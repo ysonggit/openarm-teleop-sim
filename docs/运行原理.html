@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="blueprint" data-mode="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Answer me with HTML 0.3.0">
+<title>OpenArm 遥操作仿真 · 运行原理</title>
+<style>
+html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 0px;
+  --shadow: none;
+  --bw: 1.5px;
+  --head-font: var(--font-sans);
+  --bg: #f6f6f3;
+  --paper: #ffffff;
+  --ink: #16181d;
+  --ink-2: #4b5260;
+  --ink-3: #8b929e;
+  --line: #1d2026;
+  --line-2: #d6dae1;
+  --fill: #f3f5f8;
+  --accent: #1d5fbf;
+  --accent-bg: #e4ecf8;
+  --ok: #1d5fbf;
+  --ok-bg: #e4ecf8;
+  --err: #c62828;
+  --err-bg: #fbeaea;
+  --warn: #a8620a;
+  --warn-bg: #fdf3e2;
+  --head-bg: #16181d;
+  --head-fg: #ffffff;
+}
+html[data-theme="blueprint"][data-mode="dark"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="blueprint"][data-mode="auto"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+}
+
+html[data-theme="shadcn"], html[data-theme="shadcn"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 8px;
+  --shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+  --bw: 1px;
+  --head-font: var(--font-sans);
+  --bg: #fafafa;
+  --paper: #ffffff;
+  --ink: #09090b;
+  --ink-2: #71717a;
+  --ink-3: #a1a1aa;
+  --line: #e4e4e7;
+  --line-2: #f0f0f2;
+  --fill: #f4f4f5;
+  --accent: #2563eb;
+  --accent-bg: #eff6ff;
+  --ok: #16a34a;
+  --ok-bg: #f0fdf4;
+  --err: #dc2626;
+  --err-bg: #fef2f2;
+  --warn: #d97706;
+  --warn-bg: #fffbeb;
+  --head-bg: #18181b;
+  --head-fg: #fafafa;
+}
+html[data-theme="shadcn"][data-mode="dark"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="shadcn"][data-mode="auto"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+}
+
+/* Answer me with HTML base — 只引用主题变量，禁止写死颜色（主题 token 见 themes/index.js） */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+code, pre, kbd { font-family: var(--font-mono); }
+
+/* ── 工具栏 ─────────────────────────────── */
+.am-toolbar {
+  position: fixed; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px;
+}
+.am-btn {
+  font: 12px/1 var(--font-sans); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line-2); border-radius: var(--radius); padding: 7px 10px; cursor: pointer;
+}
+.am-btn:hover { border-color: var(--ink-3); }
+.am-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── 页头 ───────────────────────────────── */
+.am-head { margin: 0 0 20px; padding-right: 260px; }
+.am-head h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: -0.01em; }
+.am-sub { margin: 4px 0 0; color: var(--ink-2); }
+.am-head-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+.am-head-meta b { font-family: var(--font-mono); font-weight: 400; color: var(--ink-3); margin-right: 6px; }
+.am-intro { margin-top: 12px; max-width: 80ch; }
+
+/* ── sheet 图纸板 ────────────────────────── */
+.am-sheet { max-width: 1680px; margin: 0 auto; padding: 32px 28px 40px; }
+.am-frame { position: relative; }
+.am-grid {
+  display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 20px; align-items: start;
+}
+.am-ruler { display: none; }
+html[data-theme="blueprint"] .am-frame { border: 1px solid var(--line); padding: 30px; }
+html[data-theme="blueprint"] .am-frame::before {
+  content: ""; position: absolute; inset: 18px; border: 1px solid var(--line); pointer-events: none;
+}
+html[data-theme="blueprint"] .am-ruler {
+  display: flex; position: absolute; font: 10px/1 var(--font-mono); color: var(--ink-3);
+}
+.am-ruler span { flex: 1; display: flex; align-items: center; justify-content: center; }
+.am-ruler--top, .am-ruler--bottom { left: 18px; right: 18px; height: 18px; }
+.am-ruler--top { top: 0; }
+.am-ruler--bottom { bottom: 0; }
+.am-ruler--left, .am-ruler--right { top: 18px; bottom: 18px; width: 18px; flex-direction: column; }
+.am-ruler--left { left: 0; }
+.am-ruler--right { right: 0; }
+.am-ruler--top span + span, .am-ruler--bottom span + span { border-left: 1px solid var(--line); }
+.am-ruler--left span + span, .am-ruler--right span + span { border-top: 1px solid var(--line); }
+
+/* ── 面板 ───────────────────────────────── */
+.am-panel {
+  background: var(--paper); border: var(--bw) solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); min-width: 0; overflow: hidden;
+}
+.am-panel-head {
+  display: flex; align-items: stretch; gap: 0; border-bottom: var(--bw) solid var(--line); min-height: 34px;
+}
+.am-panel-id {
+  display: flex; align-items: center; justify-content: center; min-width: 34px; padding: 0 8px;
+  background: var(--head-bg); color: var(--head-fg); font-weight: 600; font-size: 14px;
+}
+html[data-theme="shadcn"] .am-panel-id { border-radius: 6px; min-width: 24px; height: 24px; margin: 9px 0 9px 14px; font-size: 12px; }
+html[data-theme="shadcn"] .am-panel-head { border-bottom-width: 1px; }
+.am-panel-head h2 { margin: 0; padding: 7px 12px; font-size: 15px; font-weight: 600; flex: 1; display: flex; align-items: center; }
+.am-panel-meta { align-self: center; padding: 0 12px; font: 11px/1.3 var(--font-mono); color: var(--ink-2); text-align: right; }
+.am-panel-body { padding: 14px 16px 16px; }
+.am-panel-body > * + * { margin-top: 12px; }
+
+/* ── Markdown 正文 ───────────────────────── */
+.am-md > :first-child { margin-top: 0; }
+.am-md > :last-child { margin-bottom: 0; }
+.am-md p { margin: 0 0 8px; }
+.am-md ul, .am-md ol { margin: 0 0 8px; padding-left: 20px; }
+.am-md li + li { margin-top: 3px; }
+.am-md h3, .am-md h4 { margin: 14px 0 6px; font-size: 13px; }
+.am-md a { color: var(--accent); }
+.am-md blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
+.am-md :not(pre) > code { font-size: 0.9em; background: var(--fill); padding: 1px 5px; border-radius: 4px; }
+.am-md hr { border: 0; border-top: 1px solid var(--line-2); margin: 12px 0; }
+.am-md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.am-md th {
+  text-align: left; font: 11px/1.3 var(--font-mono); color: var(--ink-2); font-weight: 400;
+  padding: 6px 10px; border-bottom: 1px solid var(--line-2);
+}
+.am-md td { padding: 7px 10px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.am-md tbody tr:nth-child(even) td { background: var(--fill); }
+.am-table-wrap { overflow-x: auto; }
+.am-code {
+  margin: 0; padding: 12px 14px; background: var(--fill); border: 1px solid var(--line-2);
+  border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+}
+
+/* ── 状态徽章 ok / no / warn ──────────────── */
+.am-status { white-space: nowrap; font-weight: 500; }
+.am-status--ok { color: var(--ok); }
+.am-status--no { color: var(--err); }
+.am-status--warn { color: var(--warn); }
+.am-status-icon { display: inline-block; width: 1.1em; font-weight: 700; }
+
+/* ── callout ─────────────────────────────── */
+.am-callout {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--accent); background: var(--accent-bg);
+  padding: 10px 14px; border-radius: var(--radius);
+}
+.am-callout--ok { border-left-color: var(--ok); background: var(--ok-bg); }
+.am-callout--warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.am-callout--err { border-left-color: var(--err); background: var(--err-bg); }
+.am-callout-title { font-weight: 600; margin-bottom: 4px; }
+
+/* ── kv 标题栏格 ─────────────────────────── */
+.am-kv {
+  display: grid; grid-template-columns: repeat(var(--kv-cols, 2), minmax(0, 1fr)); margin: 0;
+  border-top: var(--bw) solid var(--line); border-left: var(--bw) solid var(--line);
+}
+.am-kv-cell { border-right: var(--bw) solid var(--line); border-bottom: var(--bw) solid var(--line); padding: 6px 10px 8px; min-width: 0; }
+.am-kv-cell--wide { grid-column: 1 / -1; }
+.am-kv dt { font: 11px/1.4 var(--font-mono); color: var(--ink-2); }
+.am-kv dd { margin: 2px 0 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.am-kv-cell--wide dd { font-size: 17px; font-weight: 600; }
+html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var(--radius); overflow: hidden; }
+
+/* ── timeline ────────────────────────────── */
+.am-timeline { list-style: none; margin: 0; padding: 0; }
+.am-timeline--h { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); padding-top: 4px; }
+.am-timeline--h li { position: relative; text-align: center; padding: 0 6px; }
+.am-timeline--h li::before {
+  content: ""; position: absolute; top: 31px; left: 0; right: 0; border-top: var(--bw) solid var(--line);
+}
+.am-timeline--h li:first-child::before { left: 50%; }
+.am-timeline--h li:last-child::before { right: 50%; }
+.am-tl-when { display: block; font-size: 15px; font-weight: 500; height: 24px; }
+.am-tl-dot {
+  position: relative; display: block; width: 11px; height: 11px; margin: 2px auto 8px;
+  border: var(--bw) solid var(--line); border-radius: 50%; background: var(--paper);
+}
+.am-tl-item--hi .am-tl-dot { background: var(--accent); border-color: var(--accent); }
+.am-tl-title { display: block; font-size: 12.5px; font-weight: 500; }
+.am-tl-text { display: block; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.am-timeline--v li { position: relative; padding: 0 0 14px 22px; }
+.am-timeline--v li::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: -6px; border-left: var(--bw) solid var(--line-2); }
+.am-timeline--v li:last-child::before { display: none; }
+.am-timeline--v .am-tl-dot { position: absolute; left: 0; top: 4px; margin: 0; }
+.am-timeline--v .am-tl-when { display: inline; height: auto; font: 12px var(--font-mono); color: var(--ink-2); margin-right: 8px; }
+.am-timeline--v .am-tl-title { display: inline; font-size: 14px; }
+.am-timeline--v .am-tl-text { margin-top: 2px; }
+
+/* ── annot 句子标注 ──────────────────────── */
+.am-annot + .am-annot { border-top: 1px solid var(--line-2); padding-top: 12px; }
+.am-annot-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.am-annot-meta { font: 11px var(--font-mono); font-weight: 400; color: var(--ink-2); }
+.am-annot-scroll { overflow-x: auto; }
+.am-annot-line {
+  position: relative; display: inline-block; white-space: pre; font: 14px/1.6 var(--font-mono);
+  padding-bottom: calc(var(--rows, 0) * 17px + 14px);
+}
+.am-annot-line--wrap { display: block; white-space: normal; padding-bottom: 10px; }
+.am-annot-line--wrap .am-seg { white-space: nowrap; }
+.am-seg { position: relative; }
+.am-seg::after {
+  content: ""; position: absolute; left: 1px; right: 1px; top: calc(100% + 1px); height: 5px;
+  border: 1px solid var(--accent); border-top: 0;
+}
+.am-seg-n {
+  position: absolute; left: 0; top: calc(100% + 8px + var(--row, 0) * 17px);
+  font: 11px/16px var(--font-sans); color: var(--accent); white-space: nowrap;
+}
+.am-seg--err { color: var(--err); }
+.am-seg--err::after { border-color: var(--err); }
+.am-seg--err .am-seg-n { color: var(--err); }
+.am-annot-caption { font-size: 12px; color: var(--ink-2); }
+
+/* ── limits 限值条 ───────────────────────── */
+.am-lim + .am-lim { margin-top: 14px; }
+.am-lim-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 4px; }
+.am-lim-val { font: 12px var(--font-mono); color: var(--accent); white-space: nowrap; }
+.am-lim-track { position: relative; height: 12px; border: 1px solid var(--line-2); background: var(--fill); border-radius: calc(var(--radius) / 2); }
+.am-lim-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-bg); border-right: 1px solid var(--accent); }
+.am-lim-mark { position: absolute; top: -4px; bottom: -4px; border-left: 2px solid var(--accent); }
+.am-lim.is-over .am-lim-fill { background: var(--err-bg); border-right-color: var(--err); }
+.am-lim.is-over .am-lim-val { color: var(--err); }
+.am-lim-ticks { position: relative; height: 16px; font: 10px/16px var(--font-mono); color: var(--ink-3); }
+.am-lim-ticks span { position: absolute; transform: translateX(-50%); }
+.am-lim-ticks span:first-child { transform: none; }
+.am-lim-note { font-size: 11px; color: var(--ink-2); margin-left: 6px; }
+
+/* ── tree 结构树 ─────────────────────────── */
+.am-tree { font-size: 13px; }
+.am-tree-root { display: flex; justify-content: center; position: relative; padding-bottom: 18px; }
+.am-tree-root::after { content: ""; position: absolute; bottom: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-root--solo { padding-bottom: 12px; }
+.am-tree-root--solo::after { display: none; }
+.am-tree-box {
+  border: var(--bw) solid var(--line); background: var(--paper); padding: 6px 14px; text-align: center;
+  border-radius: var(--radius); font-weight: 600;
+}
+.am-tree-box small { display: block; font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.am-tree-box--root { background: var(--accent-bg); font-size: 15px; padding: 8px 28px; }
+.am-tree-cols { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); }
+.am-tree-col { position: relative; padding: 18px 8px 0; min-width: 0; }
+.am-tree-col::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: var(--bw) solid var(--line); }
+.am-tree-col:first-child::before { left: 50%; }
+.am-tree-col:last-child::before { right: 50%; }
+.am-tree-col::after { content: ""; position: absolute; top: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-list, .am-tree-list ul { list-style: none; margin: 0; padding: 0; }
+.am-tree-col > .am-tree-list { margin: 8px 0 0 14px; }
+.am-tree-list ul { margin-left: 16px; }
+.am-tree-list li { position: relative; padding: 3px 0 3px 18px; }
+.am-tree-list li::before { content: ""; position: absolute; left: 0; top: 0.95em; width: 12px; border-top: 1px solid var(--ink-3); }
+.am-tree-list li::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 1px solid var(--ink-3); }
+.am-tree-list li:last-child::after { bottom: auto; height: 0.95em; }
+.am-tree-tag { font: 11px var(--font-mono); color: var(--ink-3); margin-right: 4px; }
+.am-tree code { font: 12px var(--font-mono); }
+.am-tree-sub { display: block; font-size: 11.5px; color: var(--ink-2); }
+.am-tree-hi > .am-tree-label { color: var(--accent); font-weight: 600; }
+
+/* ── 图（flow / sequence）───────────────── */
+.am-diagram { margin: 0; overflow-x: auto; text-align: center; }
+.am-diagram svg { max-width: 100%; height: auto; font-family: var(--font-sans); }
+.am-diagram text { fill: var(--ink); font-size: 13px; }
+.am-node-shape { fill: var(--paper); stroke: var(--line); stroke-width: var(--bw); }
+.am-node--hi .am-node-shape { fill: var(--accent-bg); stroke: var(--accent); }
+.am-node--hi text { fill: var(--accent); font-weight: 600; }
+.am-edge { fill: none; stroke: var(--ink-2); stroke-width: 1.3; }
+.am-edge--dashed { stroke-dasharray: 5 4; }
+.am-arrow { fill: var(--ink-2); }
+.am-edge-label rect { fill: var(--paper); }
+.am-diagram .am-edge-label text { fill: var(--accent); font-size: 11.5px; }
+.am-cluster { fill: var(--fill); stroke: var(--line-2); stroke-width: 1; stroke-dasharray: 4 3; }
+.am-diagram .am-cluster-label { fill: var(--ink-2); font: 11px var(--font-mono); }
+.am-lifeline { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 4 4; }
+.am-actor { fill: var(--paper); stroke: var(--line); stroke-width: var(--bw); }
+.am-note { fill: var(--warn-bg); stroke: var(--warn); stroke-width: 1; }
+.am-diagram .am-step { fill: var(--ink-3); font: 10px var(--font-mono); }
+
+/* ── doc 线性讲解 ────────────────────────── */
+.am-doc { max-width: 1120px; margin: 0 auto; padding: 40px 28px 64px; }
+.am-doc-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; }
+.am-doc-layout--notoc { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+.am-toc { position: sticky; top: 24px; font-size: 13px; }
+.am-toc a { display: block; color: var(--ink-2); text-decoration: none; padding: 4px 0 4px 10px; border-left: 2px solid var(--line-2); }
+.am-toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+.am-doc-body > .am-panel + .am-panel { margin-top: 20px; }
+
+/* ── 响应式与打印 ─────────────────────────── */
+@media (max-width: 1100px) {
+  .am-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .am-grid > .am-panel { grid-column: auto !important; }
+  .am-grid > .am-panel.am-span-wide { grid-column: 1 / -1 !important; }
+}
+@media (max-width: 760px) {
+  .am-sheet, .am-doc { padding: 56px 12px 24px; }
+  .am-head { padding-right: 0; }
+  .am-grid { grid-template-columns: minmax(0, 1fr); }
+  .am-grid > .am-panel.am-span-wide { grid-column: auto !important; }
+  html[data-theme="blueprint"] .am-frame { padding: 0; border: 0; }
+  html[data-theme="blueprint"] .am-frame::before, html[data-theme="blueprint"] .am-ruler { display: none; }
+  .am-doc-layout { grid-template-columns: minmax(0, 1fr); }
+  .am-toc { position: static; }
+  .am-timeline--h { grid-template-columns: minmax(0, 1fr); }
+  .am-tree-cols { grid-template-columns: minmax(0, 1fr); }
+}
+.am-colophon { text-align: center; padding: 0 0 28px; font: 11px var(--font-mono); color: var(--ink-3); }
+
+@media print {
+  .am-toolbar { display: none; }
+  body { background: var(--paper); }
+  .am-panel { break-inside: avoid; box-shadow: none; }
+}
+.am-panel--bare { border: 0; background: transparent; box-shadow: none; }
+.am-panel--bare > .am-panel-body { padding: 0; }
+.am-panel--bare .am-kv { background: var(--paper); }
+
+</style>
+</head>
+<body>
+<div class="am-toolbar">
+<button class="am-btn" type="button" data-am="theme" data-labels="{&quot;blueprint&quot;:&quot;主题：图纸&quot;,&quot;shadcn&quot;:&quot;主题：卡片&quot;}">主题：图纸</button>
+<button class="am-btn" type="button" data-am="mode" data-labels="{&quot;auto&quot;:&quot;明暗：跟随系统&quot;,&quot;light&quot;:&quot;明暗：亮&quot;,&quot;dark&quot;:&quot;明暗：暗&quot;}">明暗：跟随系统</button>
+<button class="am-btn" type="button" data-am="copy" data-done="已复制 ✓">复制源稿</button>
+</div>
+<main class="am-sheet">
+<header class="am-head"><h1>OpenArm 遥操作仿真 · 运行原理</h1><p class="am-sub">浏览器只发目标，机器人本地决定怎么动</p><div class="am-head-meta"><span><b>repo</b>~/Projects/openarm-teleop-sim</span><span><b>model</b>OpenArm v1 双臂（MuJoCo）</span></div><div class="am-intro am-md"><div class="am-md"><p>核心原则：高频控制留在机器人本地。网络只传目标、状态和画面。网络断了，机器人自己停。</p>
+</div></div></header>
+<div class="am-frame">
+<div class="am-ruler am-ruler--top" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--bottom" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div><div class="am-ruler am-ruler--left" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div><div class="am-ruler am-ruler--right" aria-hidden="true"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+<div class="am-grid" style="--cols: 3">
+<section class="am-panel am-span-wide am-panel--bare" id="panel-A" style="grid-column: span 3">
+<div class="am-panel-body"><div class="am-callout am-callout--info" role="note"><div class="am-callout-title">三层分工</div><div class="am-callout-body am-md"><ul>
+<li><strong>浏览器（操作员）</strong>：拖滑块，每 50 ms 发一次&quot;目标位姿&quot;。</li>
+<li><strong>边缘进程（机器人本地）</strong>：每 10 ms 跑一拍控制循环。安全层先裁剪和限速，再把结果交给关节控制器。</li>
+<li><strong>MuJoCo（机器人替身）</strong>：模拟物理和相机。换成真机时，只换这一层。</li>
+</ul>
+</div></div></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-B" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>系统结构</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 1343 268" width="1343" height="268" role="img" aria-label="流程图：操作员浏览器、WebSocket、边缘服务 server.py、安全层 safety.py、仿真适配器 mujoco_adapter.py、MuJoCo 物理、会话日志 logs/" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g><rect class="am-cluster" x="486" y="103" width="842.6" height="138.5" rx="4"/><text class="am-cluster-label" x="494" y="117">机器人本地</text></g><g><g data-step="0"><path class="am-edge" d="M120,185.4 L161.1,194.9 Q202.1,204.5 258.2,204.5 L314.2,204.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="144" y="195.5" width="116.3" height="18" rx="3"/><text x="202.1" y="204.5" text-anchor="middle" dominant-baseline="central">cmd 目标位姿 20 Hz</text></g></g><g data-step="1"><path class="am-edge" d="M410.1,204.5 L436.5,204.5 Q463,204.5 474.5,204.5 Q486,204.5 506.7,197.5 L527.4,190.5" marker-end="url(#am1-arrow)"/></g><g data-step="2"><path class="am-edge" d="M649.1,182.2 L669.3,184.8 Q689.6,187.5 709.8,187.5 L730.1,187.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="673.1" y="178.5" width="33" height="18" rx="3"/><text x="689.6" y="187.5" text-anchor="middle" dominant-baseline="central">目标</text></g></g><g data-step="3"><path class="am-edge" d="M857.1,187.5 L894.8,187.5 Q932.5,187.5 970.1,187.5 L1007.8,187.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="881.1" y="178.5" width="102.7" height="18" rx="3"/><text x="932.5" y="187.5" text-anchor="middle" dominant-baseline="central">限速后的 setpoint</text></g></g><g data-step="4"><path class="am-edge" d="M1151,187.5 L1162.5,187.5 Q1174,187.5 1185.5,187.5 L1197,187.5" marker-end="url(#am1-arrow)"/></g><g data-step="5"><path class="am-edge am-edge--dashed" d="M519.3,155.5 L502.7,150.6 Q486,145.8 474.5,145.8 Q463,145.8 412.6,145.8 Q362.1,145.8 282.1,145.8 Q202.1,145.8 161.1,154 L120,162.3" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="285.3" y="136.8" width="153.8" height="18" rx="3"/><text x="362.1" y="145.8" text-anchor="middle" dominant-baseline="central">state 20 Hz + JPEG 14 fps</text></g></g><g data-step="6"><path class="am-edge am-edge--dashed" d="M631,155.5 L660.3,145.6 Q689.6,135.8 726.6,105.4 L763.7,75" marker-end="url(#am1-arrow)"/></g></g><g><g class="am-node am-node--rect am-node--hi" data-key="操作员浏览器" data-step="0"><rect class="am-node-shape" x="14" y="155.5" width="106" height="35" rx="3"/><text x="67" y="173" text-anchor="middle" dominant-baseline="central">操作员浏览器</text></g><g class="am-node am-node--rect" data-key="WebSocket" data-step="0"><rect class="am-node-shape" x="314.2" y="187" width="95.9" height="35" rx="3"/><text x="362.1" y="204.5" text-anchor="middle" dominant-baseline="central">WebSocket</text></g><g class="am-node am-node--rect" data-key="边缘服务 server.py" data-step="1"><rect class="am-node-shape" x="509" y="155.5" width="140.1" height="35" rx="3"/><text x="579" y="173" text-anchor="middle" dominant-baseline="central">边缘服务 server.py</text></g><g class="am-node am-node--rect am-node--hi" data-key="安全层 safety.py" data-step="2"><rect class="am-node-shape" x="730.1" y="170" width="127.1" height="35" rx="3"/><text x="793.6" y="187.5" text-anchor="middle" dominant-baseline="central">安全层 safety.py</text></g><g class="am-node am-node--rect" data-key="仿真适配器 mujoco_adapter.py" data-step="3"><rect class="am-node-shape" x="1007.8" y="161.5" width="143.2" height="52" rx="3"/><text x="1079.4" y="179" text-anchor="middle" dominant-baseline="central">仿真适配器</text><text x="1079.4" y="196" text-anchor="middle" dominant-baseline="central">mujoco_adapter.py</text></g><g class="am-node am-node--db" data-key="MuJoCo 物理" data-step="4"><path class="am-node-shape" d="M1197,170 A54.3,7 0 0 1 1305.6,170 V205 A54.3,7 0 0 1 1197,205 Z"/><path class="am-node-shape" d="M1197,170 A54.3,7 0 0 0 1305.6,170"/><text x="1251.3" y="191.5" text-anchor="middle" dominant-baseline="central">MuJoCo 物理</text></g><g class="am-node am-node--db" data-key="会话日志 logs/" data-step="6"><path class="am-node-shape" d="M735,33 A58.6,7 0 0 1 852.2,33 V68 A58.6,7 0 0 1 735,68 Z"/><path class="am-node-shape" d="M735,33 A58.6,7 0 0 0 852.2,33"/><text x="793.6" y="54.5" text-anchor="middle" dominant-baseline="central">会话日志 logs/</text></g></g></svg></figure></div>
+</section>
+<section class="am-panel" id="panel-C">
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>三个位姿</h2><span class="am-panel-meta">界面右侧显示 实测 → setpoint</span></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>名称</th>
+<th>含义</th>
+<th>谁决定</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>goal</td>
+<td>操作员想去的位置</td>
+<td>浏览器滑块</td>
+</tr>
+<tr>
+<td>setpoint</td>
+<td>这一拍允许去的位置</td>
+<td>安全层</td>
+</tr>
+<tr>
+<td>实测</td>
+<td>关节现在的位置</td>
+<td>物理仿真</td>
+</tr>
+</tbody></table></div>
+<p>setpoint 每拍最多向 goal 移动 1 rad/s × 10 ms。滑块猛拉，机械臂也只匀速跟上。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-D">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>每 10 ms 一拍</h2></header>
+<div class="am-panel-body"><div class="am-md"><ol>
+<li>读取 16 个执行器的实测位置。</li>
+<li>安全层计算新的 setpoint。</li>
+<li>把 setpoint 写给关节位置控制器。</li>
+<li>物理步进 10 次，每次 1 ms。</li>
+<li>每 5 拍广播一次 state。</li>
+<li>每 7 拍渲染一帧 JPEG。</li>
+</ol>
+</div></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-E" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>安全状态机</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 772 155" width="772" height="155" role="img" aria-label="流程图：启动、HOLD、ACTIVE、ESTOP" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M90,52 L101.5,52 Q113,52 124.5,52 L136,52" marker-end="url(#am2-arrow)"/></g><g data-step="1"><path class="am-edge" d="M204,65.5 L263.7,89.1 Q323.4,112.8 383.1,112.8 L442.8,112.8" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="271.4" y="103.8" width="104.1" height="18" rx="3"/><text x="323.4" y="112.8" text-anchor="middle" dominant-baseline="central">操作员点 Activate</text></g></g><g data-step="2"><path class="am-edge" d="M450.3,95.3 L386.9,59.1 Q323.4,23 263.7,34.3 L204,45.6" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="228" y="14" width="190.8" height="18" rx="3"/><text x="323.4" y="23" text-anchor="middle" dominant-baseline="central">0.5 s 收不到指令 / 断开 / Release</text></g></g><g data-step="3"><path class="am-edge" d="M519.2,106.7 L560.1,100.2 Q601,93.8 641.9,93.8 L682.8,93.8" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="552.6" y="84.8" width="96.7" height="18" rx="3"/><text x="601" y="93.8" text-anchor="middle" dominant-baseline="central">任何人按 E-stop</text></g></g><g data-step="4"><path class="am-edge" d="M204,52 L263.7,52 Q323.4,52 402.2,52 Q481,52 541,52 Q601,52 641.9,66.3 L682.8,80.7" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="457.4" y="43" width="47.3" height="18" rx="3"/><text x="481" y="52" text-anchor="middle" dominant-baseline="central">E-stop</text></g></g><g data-step="5"><path class="am-edge" d="M682.8,105.6 L641.9,118.7 Q601,131.8 560.1,125.3 L519.2,118.8" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="543.2" y="122.8" width="115.6" height="18" rx="3"/><text x="601" y="131.8" text-anchor="middle" dominant-baseline="central">操作员重新 Activate</text></g></g></g><g><g class="am-node am-node--round" data-key="启动" data-step="0"><rect class="am-node-shape" x="14" y="34.5" width="76" height="35" rx="17.5"/><text x="52" y="52" text-anchor="middle" dominant-baseline="central">启动</text></g><g class="am-node am-node--rect" data-key="HOLD" data-step="0"><rect class="am-node-shape" x="136" y="34.5" width="68" height="35" rx="3"/><text x="170" y="52" text-anchor="middle" dominant-baseline="central">HOLD</text></g><g class="am-node am-node--rect am-node--hi" data-key="ACTIVE" data-step="1"><rect class="am-node-shape" x="442.8" y="95.3" width="76.4" height="35" rx="3"/><text x="481" y="112.8" text-anchor="middle" dominant-baseline="central">ACTIVE</text></g><g class="am-node am-node--rect" data-key="ESTOP" data-step="3"><rect class="am-node-shape" x="682.8" y="76.3" width="74.5" height="35" rx="3"/><text x="720" y="93.8" text-anchor="middle" dominant-baseline="central">ESTOP</text></g></g></svg></figure></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-F" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">F</span><h2>一次操作的消息顺序</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 343 466" width="343" height="466" role="img" aria-label="时序图：浏览器、边缘" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="462"/><g data-key="浏览器"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">浏览器</text></g><line class="am-lifeline" x1="258.6" y1="42" x2="258.6" y2="462"/><g data-key="边缘"><rect class="am-actor" x="216.6" y="8" width="84" height="34" rx="2"/><text x="258.6" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">边缘</text></g><g data-step="0"><text x="156.3" y="70" text-anchor="middle">claim</text><path class="am-edge" d="M54,80 L256.6,80" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="74" text-anchor="start">1</text></g><g data-step="1"><text x="156.3" y="110" text-anchor="middle">control granted</text><path class="am-edge am-edge--dashed" d="M258.6,120 L56,120" marker-end="url(#am3-arrow)"/><text class="am-step" x="252.6" y="114" text-anchor="end">2</text></g><g data-step="2"><text x="156.3" y="150" text-anchor="middle">activate</text><path class="am-edge" d="M54,160 L256.6,160" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="154" text-anchor="start">3</text></g><g data-step="3"><rect class="am-note" x="187" y="184" width="143.1" height="28" rx="2"/><text x="258.6" y="198" text-anchor="middle" dominant-baseline="central" font-size="12">模式 HOLD → ACTIVE</text></g><g data-step="4"><line class="am-lifeline" x1="12" y1="238" x2="330.1" y2="238"/><rect class="am-actor" x="131.1" y="228" width="80" height="20" rx="2"/><text x="171.1" y="238" text-anchor="middle" dominant-baseline="central" font-size="12">持续遥操作</text></g><g data-step="5"><text x="156.3" y="268" text-anchor="middle">cmd（目标位姿，每 50 ms）</text><path class="am-edge" d="M54,278 L256.6,278" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="272" text-anchor="start">4</text></g><g data-step="6"><text x="156.3" y="308" text-anchor="middle">state（每 50 ms）</text><path class="am-edge am-edge--dashed" d="M258.6,318 L56,318" marker-end="url(#am3-arrow)"/><text class="am-step" x="252.6" y="312" text-anchor="end">5</text></g><g data-step="7"><text x="156.3" y="348" text-anchor="middle">JPEG 画面</text><path class="am-edge am-edge--dashed" d="M258.6,358 L56,358" marker-end="url(#am3-arrow)"/><text class="am-step" x="252.6" y="352" text-anchor="end">6</text></g><g data-step="8"><line class="am-lifeline" x1="12" y1="392" x2="330.1" y2="392"/><rect class="am-actor" x="137.1" y="382" width="68" height="20" rx="2"/><text x="171.1" y="392" text-anchor="middle" dominant-baseline="central" font-size="12">链路中断</text></g><g data-step="9"><rect class="am-note" x="187.8" y="416" width="141.4" height="28" rx="2"/><text x="258.6" y="430" text-anchor="middle" dominant-baseline="central" font-size="12">0.5 s 无 cmd → HOLD</text></g></svg></figure></div>
+</section>
+<section class="am-panel" id="panel-G">
+<header class="am-panel-head"><span class="am-panel-id">G</span><h2>安全层规则</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>规则</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>限位裁剪</td>
+<td>超出关节范围的目标被截断</td>
+</tr>
+<tr>
+<td>限速</td>
+<td>关节 1 rad/s，夹爪 0.05 m/s</td>
+</tr>
+<tr>
+<td>看门狗</td>
+<td>0.5 s 无指令 → HOLD</td>
+</tr>
+<tr>
+<td>HOLD</td>
+<td>停在当前 setpoint，不按实测重置</td>
+</tr>
+<tr>
+<td>E-stop</td>
+<td>停在实测位置并锁存</td>
+</tr>
+<tr>
+<td>控制权</td>
+<td>一次只有一个操作员能发 cmd</td>
+</tr>
+</tbody></table></div>
+<p>HOLD 不按实测重置，是因为重力会让手臂略低于 setpoint。按实测重置，每次暂停都会再下沉一点。</p>
+</div></div>
+</section>
+<section class="am-panel am-span-wide" id="panel-H" style="grid-column: span 2">
+<header class="am-panel-head"><span class="am-panel-id">H</span><h2>换成真机时</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>mujoco_adapter.py</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>换成 ROS 2 或供应商 SDK 适配器，接口不变</span></td>
+</tr>
+<tr>
+<td>safety.py</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>原样保留，跑在机器人本地</span></td>
+</tr>
+<tr>
+<td>server.py</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>保留，公网暴露前加认证和 TLS</span></td>
+</tr>
+<tr>
+<td>web/</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>保留，视频改用 WebRTC</span></td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+<section class="am-panel" id="panel-I">
+<header class="am-panel-head"><span class="am-panel-id">I</span><h2>这一阶段证明不了</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>状态</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>真实网络延迟和抖动</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>本地 RTT 约 1 ms</span></td>
+</tr>
+<tr>
+<td>供应商接口和固件</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>未知</span></td>
+</tr>
+<tr>
+<td>底盘与拖管</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>仿真只有立柱双臂</span></td>
+</tr>
+<tr>
+<td>安全逻辑本身</td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>13 项测试通过</span></td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+</div>
+</div>
+</main>
+<footer class="am-colophon">Generated by Answer me with HTML 0.3.0 · 2026-11-03 09:07</footer>
+<textarea id="am-source" hidden readonly aria-hidden="true">---
+title: OpenArm 遥操作仿真 · 运行原理
+subtitle: 浏览器只发目标，机器人本地决定怎么动
+cols: 3
+repo: ~/Projects/openarm-teleop-sim
+model: OpenArm v1 双臂（MuJoCo）
+---
+核心原则：高频控制留在机器人本地。网络只传目标、状态和画面。网络断了，机器人自己停。
+
+## A 一句话结论 {span=3 bare}
+```callout info 三层分工
+- **浏览器（操作员）**：拖滑块，每 50 ms 发一次&quot;目标位姿&quot;。
+- **边缘进程（机器人本地）**：每 10 ms 跑一拍控制循环。安全层先裁剪和限速，再把结果交给关节控制器。
+- **MuJoCo（机器人替身）**：模拟物理和相机。换成真机时，只换这一层。
+```
+
+## B 系统结构 {span=2}
+```flow LR
+*操作员浏览器 -&gt; WebSocket: cmd 目标位姿 20 Hz
+WebSocket -&gt; 边缘服务 server.py
+边缘服务 server.py -&gt; *安全层 safety.py: 目标
+安全层 safety.py -&gt; 仿真适配器 mujoco_adapter.py: 限速后的 setpoint
+仿真适配器 mujoco_adapter.py -&gt; [(MuJoCo 物理)]
+边缘服务 server.py --&gt; 操作员浏览器: state 20 Hz + JPEG 14 fps
+边缘服务 server.py --&gt; [(会话日志 logs/)]
+group 机器人本地: 边缘服务 server.py, 安全层 safety.py, 仿真适配器 mujoco_adapter.py, MuJoCo 物理
+```
+
+## C 三个位姿 {meta=&quot;界面右侧显示 实测 → setpoint&quot;}
+| 名称 | 含义 | 谁决定 |
+|---|---|---|
+| goal | 操作员想去的位置 | 浏览器滑块 |
+| setpoint | 这一拍允许去的位置 | 安全层 |
+| 实测 | 关节现在的位置 | 物理仿真 |
+
+setpoint 每拍最多向 goal 移动 1 rad/s × 10 ms。滑块猛拉，机械臂也只匀速跟上。
+
+## D 每 10 ms 一拍 {span=1}
+1. 读取 16 个执行器的实测位置。
+2. 安全层计算新的 setpoint。
+3. 把 setpoint 写给关节位置控制器。
+4. 物理步进 10 次，每次 1 ms。
+5. 每 5 拍广播一次 state。
+6. 每 7 拍渲染一帧 JPEG。
+
+## E 安全状态机 {span=2}
+```flow LR
+(启动) -&gt; HOLD
+HOLD -&gt; *ACTIVE: 操作员点 Activate
+ACTIVE -&gt; HOLD: 0.5 s 收不到指令 / 断开 / Release
+ACTIVE -&gt; ESTOP: 任何人按 E-stop
+HOLD -&gt; ESTOP: E-stop
+ESTOP -&gt; ACTIVE: 操作员重新 Activate
+```
+
+## F 一次操作的消息顺序 {span=2}
+```sequence num
+浏览器 -&gt; 边缘: claim
+边缘 --&gt; 浏览器: control granted
+浏览器 -&gt; 边缘: activate
+note 边缘: 模式 HOLD → ACTIVE
+== 持续遥操作 ==
+浏览器 -&gt; 边缘: cmd（目标位姿，每 50 ms）
+边缘 --&gt; 浏览器: state（每 50 ms）
+边缘 --&gt; 浏览器: JPEG 画面
+== 链路中断 ==
+note 边缘: 0.5 s 无 cmd → HOLD
+```
+
+## G 安全层规则 {span=1}
+| 规则 | 作用 |
+|---|---|
+| 限位裁剪 | 超出关节范围的目标被截断 |
+| 限速 | 关节 1 rad/s，夹爪 0.05 m/s |
+| 看门狗 | 0.5 s 无指令 → HOLD |
+| HOLD | 停在当前 setpoint，不按实测重置 |
+| E-stop | 停在实测位置并锁存 |
+| 控制权 | 一次只有一个操作员能发 cmd |
+
+HOLD 不按实测重置，是因为重力会让手臂略低于 setpoint。按实测重置，每次暂停都会再下沉一点。
+
+## H 换成真机时 {span=2}
+| 文件 | 处理 |
+|---|---|
+| mujoco_adapter.py | warn 换成 ROS 2 或供应商 SDK 适配器，接口不变 |
+| safety.py | ok 原样保留，跑在机器人本地 |
+| server.py | warn 保留，公网暴露前加认证和 TLS |
+| web/ | warn 保留，视频改用 WebRTC |
+
+## I 这一阶段证明不了 {span=1}
+| 项目 | 状态 |
+|---|---|
+| 真实网络延迟和抖动 | no 本地 RTT 约 1 ms |
+| 供应商接口和固件 | no 未知 |
+| 底盘与拖管 | no 仿真只有立柱双臂 |
+| 安全逻辑本身 | ok 13 项测试通过 |
+</textarea>
+<script>
+(() => {
+  const root = document.documentElement;
+  const cycle = (list, cur) => list[(list.indexOf(cur) + 1) % list.length];
+  const label = (btn, value) => {
+    const map = JSON.parse(btn.dataset.labels || '{}');
+    btn.textContent = map[value] || value;
+  };
+  const bind = (name, attr, values) => {
+    const btn = document.querySelector(`[data-am="${name}"]`);
+    if (!btn) return;
+    label(btn, root.getAttribute(attr));
+    btn.addEventListener('click', () => {
+      const next = cycle(values, root.getAttribute(attr));
+      root.setAttribute(attr, next);
+      label(btn, next);
+    });
+  };
+  bind('theme', 'data-theme', ['blueprint', 'shadcn']);
+  bind('mode', 'data-mode', ['auto', 'light', 'dark']);
+
+  const copyBtn = document.querySelector('[data-am="copy"]');
+  copyBtn?.addEventListener('click', async () => {
+    const text = document.getElementById('am-source').value;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = Object.assign(document.createElement('textarea'), { value: text });
+      document.body.append(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const original = copyBtn.textContent;
+    copyBtn.textContent = copyBtn.dataset.done;
+    setTimeout(() => { copyBtn.textContent = original; }, 1400);
+  });
+})();
+</script>
+</body>
+</html>

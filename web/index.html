@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenArm Teleop Sim</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <strong>OpenArm Teleop · Sim</strong>
+    <span id="link" class="pill">connecting…</span>
+    <span id="mode" class="pill">—</span>
+    <span id="reason"></span>
+    <span id="rtt">RTT —</span>
+  </header>
+  <main>
+    <section class="video"><img id="video" alt="robot camera"></section>
+    <section class="panel">
+      <div class="buttons">
+        <button id="claim">Claim control</button>
+        <button id="activate" disabled>Activate</button>
+        <button id="home" disabled>Home</button>
+        <button id="estop" class="estop">E-STOP (space)</button>
+      </div>
+      <label class="drop"><input type="checkbox" id="pause"> Stop sending commands (simulate link loss)</label>
+      <div id="joints"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

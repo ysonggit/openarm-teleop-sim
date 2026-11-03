@@ -1,0 +1,12 @@
+[project]
+name = "openarm-teleop-sim"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["mujoco>=3.2", "aiohttp>=3.9", "pillow>=10", "numpy"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
