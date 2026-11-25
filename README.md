@@ -30,6 +30,8 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 
 ## 结构（与真实边缘设备一一对应）
 
+![系统结构：操作员浏览器经 WebSocket 连到边缘服务，边缘端 teleop → IK → 安全层 → MuJoCo](docs/system-diagram.drawio.png)
+
 | 文件 | 作用 | 换成真机时 |
 |---|---|---|
 | `edge/mujoco_adapter.py` | 机器人替身：关节名、限位、读状态、写目标、相机画面 | 换成 ROS 2 或供应商 SDK 适配器，接口不变 |
