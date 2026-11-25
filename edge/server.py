@@ -185,6 +185,15 @@ async def ws_handler(request):
     return ws
 
 
+@web.middleware
+async def no_stale_ui(request, handler):
+    """Make browsers revalidate UI files, so an updated app.js is never skipped."""
+    resp = await handler(request)
+    if request.path != "/ws":
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 def main():
     p = argparse.ArgumentParser()
     # Cartesian teleop uses Enactic OpenArm v1 bimanual names (see edge/teleop.py).
@@ -203,7 +212,7 @@ def main():
     meta, blob = export_scene(adapter.model)
     print(f"3D scene: {len(meta['geoms'])} geoms, {meta['nvert']} vertices, {len(blob) / 1e6:.1f} MB")
 
-    app = web.Application()
+    app = web.Application(middlewares=[no_stale_ui])
     app["edge"] = edge
     app.router.add_get("/ws", ws_handler)
     app.router.add_get("/scene.json", lambda r: web.json_response(meta))
