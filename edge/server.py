@@ -2,7 +2,8 @@
 
 The 100 Hz loop and the safety gate run here. The browser sends gamepad
 velocities (~20 Hz); IK turns them into joint goals for the gate. The browser
-receives state (20 Hz) and JPEG frames (~14 fps).
+receives state (20 Hz, incl. body poses for the 3D view) and JPEG frames
+(~14 fps).
 
     uv run python -m edge.server [--port 8765]
 """
@@ -11,13 +12,15 @@ import argparse
 import asyncio
 import itertools
 import json
+import math
 import time
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-from edge.mujoco_adapter import MujocoAdapter
+from edge.mujoco_adapter import MARKER_ACTIVE, MARKER_DONE, MARKER_IDLE, MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
+from edge.scene import body_poses, export_scene
 from edge.task import RADIUS, TARGETS, ReachTask
 from edge.teleop import MAX_SPEED, TCP, CartesianTeleop
 
@@ -58,6 +61,8 @@ class Edge:
             "watchdog_s": self.gate.watchdog_s,
             "arms": list(self.teleop.arms),
             "max_speed": MAX_SPEED,
+            "camera": a.camera_params(),
+            "markers": {"ids": a.marker_ids, "idle": MARKER_IDLE, "active": MARKER_ACTIVE, "done": MARKER_DONE},
         }
 
     def state(self):
@@ -72,6 +77,7 @@ class Edge:
             "goal": g.goal.tolist(),
             "target": g.target.tolist(),
             "task": self.task.summary(time.monotonic()),
+            "bodies": body_poses(self.adapter.data),
         }
 
     async def run(self):
@@ -124,12 +130,14 @@ class Edge:
             self.gate.activate(q_meas, now)
             self.teleop.reset(self.gate.goal, now)
         elif kind == "ee":
-            if self.gate.mode != ACTIVE or msg.get("arm") not in self.teleop.arms or len(msg.get("v", ())) != 3:
+            yaw = msg.get("yaw")  # set when the operator drives from the 3D view
+            if (self.gate.mode != ACTIVE or msg.get("arm") not in self.teleop.arms
+                    or len(msg.get("v", ())) != 3 or not (yaw is None or (isinstance(yaw, (int, float)) and math.isfinite(yaw)))):
                 return
-            goal = self.teleop.step(self.gate.goal, msg["arm"], msg["v"], msg.get("grip", 0), now)
+            goal = self.teleop.step(self.gate.goal, msg["arm"], msg["v"], msg.get("grip", 0), now, yaw=yaw)
             result = self.gate.command(goal, now)
             self.log.write("ee", client=cid, seq=msg.get("seq"), arm=msg["arm"], v=msg["v"],
-                           grip=msg.get("grip", 0), result=result)
+                           grip=msg.get("grip", 0), yaw=yaw, result=result)
         elif kind == "home":
             if self.gate.mode == ACTIVE:
                 self.gate.command(self.adapter.home, now)
@@ -192,9 +200,14 @@ def main():
     edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, ReachTask())
     print(f"session log: {edge.log.path}")
 
+    meta, blob = export_scene(adapter.model)
+    print(f"3D scene: {len(meta['geoms'])} geoms, {meta['nvert']} vertices, {len(blob) / 1e6:.1f} MB")
+
     app = web.Application()
     app["edge"] = edge
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/scene.json", lambda r: web.json_response(meta))
+    app.router.add_get("/scene.bin", lambda r: web.Response(body=blob, content_type="application/octet-stream"))
     app.router.add_get("/", lambda r: web.FileResponse(ROOT / "web/index.html"))
     app.router.add_static("/", ROOT / "web")
 

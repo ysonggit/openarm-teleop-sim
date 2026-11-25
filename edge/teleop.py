@@ -18,6 +18,12 @@ GRIP = {side: f"{side}_finger1_ctrl" for side in ("left", "right")}
 TCP = {side: f"openarm_{side}_hand_tcp" for side in ("left", "right")}
 
 
+def yaw_frame(yaw):
+    """Columns (right, forward, up) for a level view heading `yaw` from +x."""
+    fwd = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+    return np.column_stack([[fwd[1], -fwd[0], 0.0], fwd, [0.0, 0.0, 1.0]])
+
+
 class Arm:
     def __init__(self, model, names, home, side):
         self.idx = [names.index(n) for n in ARM_JOINTS[side]]
@@ -39,13 +45,18 @@ class CartesianTeleop:
         self.targets = {s: a.ik.fk(goal[a.idx]) for s, a in self.arms.items()}
         self.last_t = now
 
-    def step(self, goal, side, v, grip, now):
-        """Integrate one operator message. Returns the new full joint goal."""
+    def step(self, goal, side, v, grip, now, yaw=None):
+        """Integrate one operator message. Returns the new full joint goal.
+
+        yaw (rad): heading of the operator's view in the world XY plane. When
+        given, the stick follows that view instead of the fixed camera.
+        """
         arm = self.arms[side]
         dt = min(max(now - self.last_t, 0.0), MAX_DT)
         self.last_t = now
 
-        target = self.targets[side] + self.frame @ np.clip(v, -1, 1) * MAX_SPEED * dt
+        frame = self.frame if yaw is None else yaw_frame(yaw)
+        target = self.targets[side] + frame @ np.clip(v, -1, 1) * MAX_SPEED * dt
         q, err = arm.ik.solve(goal[arm.idx], target)
         if err > REACH_SLACK:
             target = arm.ik.fk(q)

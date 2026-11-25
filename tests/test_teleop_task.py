@@ -82,3 +82,14 @@ def test_task_leaving_target_resets_dwell_and_finishes():
     assert task.tick(near, now=0.4) is None
     assert task.tick(near, now=0.4 + DWELL) == "done"
     assert not task.active
+
+
+@needs_model
+def test_yaw_makes_stick_follow_the_view(teleop):
+    import math
+
+    t, goal = teleop
+    start = tcp(t, "left", goal)
+    for i in range(1, 11):  # view heading +y: forward stick moves along +y
+        goal = t.step(goal, "left", [0, 1, 0], 0, now=i * 0.05, yaw=math.pi / 2)
+    np.testing.assert_allclose(tcp(t, "left", goal) - start, [0, 0.075, 0], atol=2e-3)

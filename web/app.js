@@ -1,6 +1,8 @@
 // Operator UI. While this client controls an active robot it streams the
 // gamepad (or keyboard) state at 20 Hz as end-effector velocities; the edge
 // holds the arms if that stream stops.
+import { createView3D } from "./view3d.js";
+
 const $ = (id) => document.getElementById(id);
 const SEND_PERIOD_MS = 50;
 const DEADZONE = 0.15;
@@ -8,6 +10,7 @@ const DEADZONE = 0.15;
 const BTN = { B: 1, Y: 3, LB: 4, RB: 5, RT: 7, START: 9 };
 
 let ws, hello, state, prevUrl, seq = 0, controlling = false;
+let view3d = null, view = "3d";
 let arm = "left";
 const keys = new Set();
 let prevPressed = [];
@@ -31,7 +34,7 @@ function onFrame(blob) {
 }
 
 function onJson(m) {
-  if (m.type === "hello") { hello = m; buildJoints(); }
+  if (m.type === "hello") { hello = m; buildJoints(); init3D(); }
   else if (m.type === "state") onState(m);
   else if (m.type === "pong") $("rtt").textContent = `RTT ${(performance.now() - m.t).toFixed(1)} ms`;
   else if (m.type === "control") { controlling = m.granted; if (!m.granted) alert("Another operator has control."); updateButtons(); }
@@ -46,7 +49,39 @@ function onState(m) {
   $("reason").textContent = m.reason;
   m.q.forEach((q, i) => { $(`meas${i}`).textContent = `${fmt(q)} → ${fmt(m.target[i])}`; });
   showTask(m.task);
+  if (view3d) {
+    view3d.setBodies(m.bodies);
+    view3d.setMarkers(m.task.active ? m.task.index : -1, m.task.results.length);
+  }
   updateButtons();
+}
+
+async function init3D() {
+  if (view3d) return;
+  try {
+    view3d = await createView3D($("view3d"), hello);
+    if (state) view3d.setBodies(state.bodies);
+  } catch (e) {
+    console.error("3D view unavailable", e);
+    $("viewhint").textContent = "3D view failed to load (needs WebGL and the three.js CDN).";
+    setView("cam");
+  }
+}
+
+// The stick follows whichever view is shown: the fixed robot camera, or the
+// 3D view's current heading (sent as yaw).
+function setView(v) {
+  view = v;
+  try { localStorage.setItem("view", v); } catch {}
+  document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
+  $("video").hidden = v !== "cam";
+  $("view3d").hidden = v !== "3d";
+  $("presets").hidden = v !== "3d";
+  if (!$("viewhint").textContent.startsWith("3D view failed")) {
+    $("viewhint").textContent = v === "3d"
+      ? "Drag to orbit, scroll to zoom, right-drag to pan. Stick directions follow this view."
+      : "Stick directions follow this camera.";
+  }
 }
 
 function showTask(t) {
@@ -114,6 +149,10 @@ $("activate").onclick = () => send({ type: "activate" });
 $("home").onclick = () => send({ type: "home" });
 $("estop").onclick = () => send({ type: "estop" });
 $("task").onclick = () => send({ type: "task_start" });
+document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+document.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => view3d?.setPreset(b.dataset.preset)));
+try { view = localStorage.getItem("view") || "3d"; } catch {}
+setView(view);
 
 setInterval(() => {
   const { v, grip } = readInput();
@@ -121,7 +160,9 @@ setInterval(() => {
   $("stick").textContent = v.map((x) => x.toFixed(2)).join(" ");
   $("grip").style.width = `${grip * 100}%`;
   if (controlling && state?.mode === "active" && !$("pause").checked) {
-    send({ type: "ee", seq: ++seq, arm, v, grip });
+    const msg = { type: "ee", seq: ++seq, arm, v, grip };
+    if (view === "3d" && view3d) msg.yaw = view3d.yaw();
+    send(msg);
   }
 }, SEND_PERIOD_MS);
 setInterval(() => send({ type: "ping", t: performance.now() }), 1000);

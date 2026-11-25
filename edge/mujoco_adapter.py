@@ -81,6 +81,10 @@ class MujocoAdapter:
         up = np.array([0.0, 0.0, 1.0])
         return np.column_stack([np.cross(fwd, up), fwd, up])
 
+    def camera_params(self):
+        c = self.camera
+        return {"lookat": c.lookat.tolist(), "distance": c.distance, "azimuth": c.azimuth, "elevation": c.elevation}
+
     def body_positions(self, names):
         return [self.data.xpos[self.model.body(n).id].copy() for n in names]
 
