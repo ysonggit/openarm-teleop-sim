@@ -30,7 +30,7 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 
 ## 结构（与真实边缘设备一一对应）
 
-![系统结构：操作员浏览器经 WebSocket 连到边缘服务，边缘端 teleop → IK → 安全层 → MuJoCo](docs/system-diagram.drawio.png)
+![System diagram: operator browser connects over WebSocket to the edge service; on the edge, teleop → IK → safety gate → MuJoCo](docs/system-diagram.drawio.png)
 
 | 文件 | 作用 | 换成真机时 |
 |---|---|---|
