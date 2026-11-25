@@ -6,12 +6,12 @@ import { createView3D } from "./view3d.js";
 const $ = (id) => document.getElementById(id);
 const SEND_PERIOD_MS = 50;
 const DEADZONE = 0.15;
-// Standard Gamepad API button indices.
-const BTN = { B: 1, Y: 3, LB: 4, RB: 5, RT: 7, START: 9 };
+// Standard Gamepad API button indices (X = PS4 square).
+const BTN = { B: 1, X: 2, Y: 3, LB: 4, RB: 5, RT: 7, START: 9 };
 
 let ws, hello, state, prevUrl, seq = 0, controlling = false;
 let view3d = null, view = "3d";
-let arm = "left";
+let arm = "left", mode = "arm"; // mode: "arm" moves a gripper, "drive" moves the base
 const keys = new Set();
 let prevPressed = [];
 
@@ -49,6 +49,7 @@ function onState(m) {
   $("reason").textContent = m.reason;
   m.q.forEach((q, i) => { $(`meas${i}`).textContent = `${fmt(q)} → ${fmt(m.target[i])}`; });
   showTask(m.task);
+  if (m.base) $("base").textContent = `x ${m.base[0].toFixed(2)}  y ${m.base[1].toFixed(2)}  yaw ${(m.base[2] * 180 / Math.PI).toFixed(0)}°`;
   if (view3d) {
     view3d.setBodies(m.bodies);
     view3d.setMarkers(m.task.active ? m.task.index : -1, m.task.results.length);
@@ -60,7 +61,7 @@ async function init3D() {
   if (view3d) return;
   try {
     view3d = await createView3D($("view3d"), hello);
-    if (state) view3d.setBodies(state.bodies);
+    if (state) { view3d.setBodies(state.bodies); view3d.setPreset("robot"); }
   } catch (e) {
     console.error("3D view unavailable", e);
     $("viewhint").textContent = "3D view failed to load (needs WebGL and the three.js CDN).";
@@ -105,13 +106,16 @@ function updateButtons() {
   $("task").disabled = !controlling;
 }
 
-// Returns {v: [right, forward, up] in -1..1, grip: 0..1} from gamepad or keyboard.
+function toggleMode() { if (hello?.base) mode = mode === "arm" ? "drive" : "arm"; }
+
+// Returns {v, grip} from gamepad or keyboard. v is [right, forward, up] for
+// an arm, [right, forward, turn right] for the base; each in -1..1.
 function readInput() {
   const pad = [...(navigator.getGamepads?.() ?? [])].find(Boolean);
   let v = [0, 0, 0], grip = 0;
   if (pad) {
     const dz = (x) => (Math.abs(x) < DEADZONE ? 0 : x);
-    v = [dz(pad.axes[0]), -dz(pad.axes[1]), -dz(pad.axes[3] ?? 0)];
+    v = [dz(pad.axes[0]), -dz(pad.axes[1]), mode === "drive" ? dz(pad.axes[2] ?? 0) : -dz(pad.axes[3] ?? 0)];
     grip = pad.buttons[BTN.RT]?.value ?? 0;
     const pressed = pad.buttons.map((b) => b.pressed);
     const edge = (i) => pressed[i] && !prevPressed[i];
@@ -119,11 +123,12 @@ function readInput() {
     if (edge(BTN.RB)) arm = "right";
     if (edge(BTN.B)) send({ type: "estop" });
     if (edge(BTN.START)) send({ type: "activate" });
+    if (edge(BTN.X)) toggleMode();
     if (edge(BTN.Y)) send({ type: "home" });
     prevPressed = pressed;
   }
   const k = (a, b) => (keys.has(a) ? 1 : 0) - (keys.has(b) ? 1 : 0);
-  v = [v[0] || k("KeyD", "KeyA"), v[1] || k("KeyW", "KeyS"), v[2] || k("KeyR", "KeyF")];
+  v = [v[0] || k("KeyD", "KeyA"), v[1] || k("KeyW", "KeyS"), v[2] || (mode === "drive" ? k("KeyE", "KeyQ") : k("KeyR", "KeyF"))];
   if (keys.has("KeyG")) grip = 1;
   $("device").textContent = pad ? pad.id.slice(0, 40) : "keyboard";
   return { v, grip };
@@ -131,9 +136,10 @@ function readInput() {
 
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); send({ type: "estop" }); return; }
+  if (e.code === "Tab") { e.preventDefault(); if (!e.repeat) toggleMode(); return; }
   if (e.repeat) return;
-  if (e.code === "KeyQ") arm = "left";
-  else if (e.code === "KeyE") arm = "right";
+  if (mode === "arm" && e.code === "KeyQ") arm = "left";
+  else if (mode === "arm" && e.code === "KeyE") arm = "right";
   else if (e.code === "Enter") send({ type: "activate" });
   else if (e.code === "KeyH") send({ type: "home" });
   keys.add(e.code);
@@ -157,10 +163,11 @@ setView(view);
 setInterval(() => {
   const { v, grip } = readInput();
   $("arm").textContent = arm;
+  $("drive").textContent = mode === "drive" ? "drive base" : "move arm";
   $("stick").textContent = v.map((x) => x.toFixed(2)).join(" ");
   $("grip").style.width = `${grip * 100}%`;
   if (controlling && state?.mode === "active" && !$("pause").checked) {
-    const msg = { type: "ee", seq: ++seq, arm, v, grip };
+    const msg = mode === "drive" ? { type: "base", seq: ++seq, v } : { type: "ee", seq: ++seq, arm, v, grip };
     if (view === "3d" && view3d) msg.yaw = view3d.yaw();
     send(msg);
   }

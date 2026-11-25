@@ -3,9 +3,9 @@
 The 100 Hz loop and the safety gate run here. The browser sends gamepad
 velocities (~20 Hz); IK turns them into joint goals for the gate. The browser
 receives state (20 Hz, incl. body poses for the 3D view) and JPEG frames
-(~14 fps).
+(~14 fps). The arms stand on a mobile base unless --no-base is given.
 
-    uv run python -m edge.server [--port 8765]
+    uv run python -m edge.server [--port 8765] [--no-base]
 """
 
 import argparse
@@ -16,13 +16,14 @@ import math
 import time
 from pathlib import Path
 
+import numpy as np
 from aiohttp import WSMsgType, web
 
-from edge.mujoco_adapter import MARKER_ACTIVE, MARKER_DONE, MARKER_IDLE, MujocoAdapter
+from edge.mujoco_adapter import MARKER_ACTIVE, MARKER_DONE, MARKER_IDLE, MOUNT_Z, MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
 from edge.scene import body_poses, export_scene
 from edge.task import RADIUS, TARGETS, ReachTask
-from edge.teleop import MAX_SPEED, TCP, CartesianTeleop
+from edge.teleop import BASE_SPEED, BASE_TURN, MAX_SPEED, TCP, CartesianTeleop
 
 ROOT = Path(__file__).resolve().parent.parent
 LOOP_DT = 0.01
@@ -54,13 +55,15 @@ class Edge:
             "type": "hello",
             "client_id": cid,
             "names": a.names,
-            "lower": a.lower.tolist(),
-            "upper": a.upper.tolist(),
+            "lower": finite_or_none(a.lower),  # base yaw is unlimited; JSON has no inf
+            "upper": finite_or_none(a.upper),
             "vmax": a.vmax.tolist(),
             "home": a.home.tolist(),
             "watchdog_s": self.gate.watchdog_s,
             "arms": list(self.teleop.arms),
             "max_speed": MAX_SPEED,
+            "base": None if a.base_qadr is None else
+                    {"body": a.model.body("base_link").id, "speed": BASE_SPEED, "turn": BASE_TURN},
             "camera": a.camera_params(),
             "markers": {"ids": a.marker_ids, "idle": MARKER_IDLE, "active": MARKER_ACTIVE, "done": MARKER_DONE},
         }
@@ -78,6 +81,7 @@ class Edge:
             "target": g.target.tolist(),
             "task": self.task.summary(time.monotonic()),
             "bodies": body_poses(self.adapter.data),
+            "base": np.round(self.adapter.base_pose(), 3).tolist(),
         }
 
     async def run(self):
@@ -129,19 +133,26 @@ class Edge:
         elif kind == "activate":
             self.gate.activate(q_meas, now)
             self.teleop.reset(self.gate.goal, now)
-        elif kind == "ee":
+        elif kind in ("ee", "base"):
             yaw = msg.get("yaw")  # set when the operator drives from the 3D view
-            if (self.gate.mode != ACTIVE or msg.get("arm") not in self.teleop.arms
-                    or len(msg.get("v", ())) != 3 or not (yaw is None or (isinstance(yaw, (int, float)) and math.isfinite(yaw)))):
+            if (self.gate.mode != ACTIVE or len(msg.get("v", ())) != 3
+                    or not (yaw is None or (isinstance(yaw, (int, float)) and math.isfinite(yaw)))
+                    or (kind == "ee" and msg.get("arm") not in self.teleop.arms)):
+                return
+            if kind == "base":
+                goal = self.teleop.drive(self.gate.goal, msg["v"], now, yaw=yaw)
+                result = self.gate.command(goal, now)
+                self.log.write("base", client=cid, seq=msg.get("seq"), v=msg["v"], yaw=yaw, result=result)
                 return
             goal = self.teleop.step(self.gate.goal, msg["arm"], msg["v"], msg.get("grip", 0), now, yaw=yaw)
             result = self.gate.command(goal, now)
             self.log.write("ee", client=cid, seq=msg.get("seq"), arm=msg["arm"], v=msg["v"],
                            grip=msg.get("grip", 0), yaw=yaw, result=result)
-        elif kind == "home":
+        elif kind == "home":  # arms only; the base stays put
             if self.gate.mode == ACTIVE:
-                self.gate.command(self.adapter.home, now)
-                self.teleop.reset(self.adapter.home, now)
+                goal = self.teleop.home(self.gate.goal, self.adapter.home)
+                self.gate.command(goal, now)
+                self.teleop.reset(goal, now)
         elif kind == "task_start":
             self.task.start(now)
             self.adapter.set_marker_colors(0, 0)
@@ -194,19 +205,31 @@ async def no_stale_ui(request, handler):
     return resp
 
 
+def finite_or_none(xs):
+    return [float(x) if math.isfinite(x) else None for x in xs]
+
+
+def mounted(targets, base):
+    """Task targets sit around the arms, so they rise with the base's mount height."""
+    return np.asarray(targets) + [0, 0, MOUNT_Z if base else 0]
+
+
 def main():
     p = argparse.ArgumentParser()
     # Cartesian teleop uses Enactic OpenArm v1 bimanual names (see edge/teleop.py).
     p.add_argument("--model", default=ROOT / "vendor/openarm_mujoco/v1/openarm_bimanual.xml", type=Path)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", default=8765, type=int)
+    p.add_argument("--base", default=ROOT / "vendor/tidybot_base/base.xml", type=Path, help="mobile base MJCF")
+    p.add_argument("--no-base", action="store_true", help="arms on their fixed column, no mobile base")
     args = p.parse_args()
 
-    adapter = MujocoAdapter(args.model, markers=TARGETS, marker_radius=RADIUS)
+    base = None if args.no_base else args.base
+    adapter = MujocoAdapter(args.model, base_path=base, markers=mounted(TARGETS, base), marker_radius=RADIUS)
     teleop = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper,
                              adapter.camera_frame())
     gate = SafetyGate(adapter.lower, adapter.upper, adapter.vmax)
-    edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, ReachTask())
+    edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, ReachTask(mounted(TARGETS, base)))
     print(f"session log: {edge.log.path}")
 
     meta, blob = export_scene(adapter.model)

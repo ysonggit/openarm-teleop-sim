@@ -1,5 +1,8 @@
 // 3D view drawn in the browser from body poses in each state message (like
 // RViz from /joint_states). Orbit, zoom and pan never wait on the edge.
+// On a mobile base the view slides along with the base (no rotation, so the
+// stick directions don't spin under the operator); presets are set relative
+// to the base.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -61,23 +64,29 @@ export async function createView3D(container, hello) {
   controls.maxPolarAngle = Math.PI / 2 - 0.02; // stay above the floor
   controls.maxDistance = 6;
 
+  // Presets in the base frame (the base starts at the world origin).
   const robotCam = hello.camera;
+  const z = robotCam.lookat[2] - 0.45; // mount height of the arms
   const presets = {
     robot: robotCam,
-    front: { lookat: [0.3, 0, 0.45], distance: 1.6, azimuth: 180, elevation: -15 },
-    left: { lookat: [0.3, 0, 0.45], distance: 1.6, azimuth: -90, elevation: -15 },
-    right: { lookat: [0.3, 0, 0.45], distance: 1.6, azimuth: 90, elevation: -15 },
-    top: { lookat: [0.35, 0, 0.3], distance: 1.6, azimuth: 0, elevation: -89 },
+    front: { lookat: [0.3, 0, 0.45 + z], distance: 1.6 + z, azimuth: 180, elevation: -15 },
+    left: { lookat: [0.3, 0, 0.45 + z], distance: 1.6 + z, azimuth: -90, elevation: -15 },
+    right: { lookat: [0.3, 0, 0.45 + z], distance: 1.6 + z, azimuth: 90, elevation: -15 },
+    top: { lookat: [0.35, 0, 0.3 + z], distance: 1.6 + z, azimuth: 0, elevation: -89 },
   };
+  const baseBody = hello.base?.body;
+  let base = { x: 0, y: 0, yaw: 0 };
   // MuJoCo free-camera convention: the camera looks along (azimuth, elevation).
   function setPreset(name) {
     const { lookat, distance, azimuth, elevation } = presets[name];
-    const a = azimuth * deg, e = elevation * deg;
-    controls.target.fromArray(lookat);
+    const c = Math.cos(base.yaw), s = Math.sin(base.yaw);
+    const L = [base.x + c * lookat[0] - s * lookat[1], base.y + s * lookat[0] + c * lookat[1], lookat[2]];
+    const a = azimuth * deg + base.yaw, e = elevation * deg;
+    controls.target.fromArray(L);
     camera.position.set(
-      lookat[0] - distance * Math.cos(e) * Math.cos(a),
-      lookat[1] - distance * Math.cos(e) * Math.sin(a),
-      lookat[2] - distance * Math.sin(e),
+      L[0] - distance * Math.cos(e) * Math.cos(a),
+      L[1] - distance * Math.cos(e) * Math.sin(a),
+      L[2] - distance * Math.sin(e),
     );
     controls.update();
   }
@@ -106,6 +115,13 @@ export async function createView3D(container, hello) {
         b.position.set(flat[o], flat[o + 1], flat[o + 2]);
         b.quaternion.set(flat[o + 4], flat[o + 5], flat[o + 6], flat[o + 3]);
       });
+      if (baseBody == null) return;
+      const o = baseBody * 7;
+      const next = { x: flat[o], y: flat[o + 1], yaw: 2 * Math.atan2(flat[o + 6], flat[o + 3]) };
+      const d = new THREE.Vector3(next.x - base.x, next.y - base.y, 0);
+      camera.position.add(d);
+      controls.target.add(d);
+      base = next;
     },
     setMarkers(active, done) {
       colors.ids.forEach((id, i) => {

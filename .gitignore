@@ -2,3 +2,4 @@ vendor/
 logs/
 .venv/
 __pycache__/
+MUJOCO_LOG.TXT
