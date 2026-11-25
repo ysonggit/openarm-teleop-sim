@@ -34,7 +34,9 @@ summary { cursor: pointer; color: var(--muted); }
 .view3d canvas { display: block; width: 100% !important; height: 100% !important; }
 [hidden] { display: none !important; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-.tabs button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.seg button { padding: 3px 10px; font-size: 12px; }
+.tabs button.on, .seg button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .presets { display: flex; gap: 4px; margin-left: auto; }
 .presets button { padding: 3px 8px; font-size: 12px; }
 .hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }

@@ -21,7 +21,9 @@ MARKER_DONE = [0.3, 0.65, 0.35, 0.5]
 BASE_JOINTS = ("joint_x", "joint_y", "joint_th")
 BASE_VMAX = (0.5, 0.5, 1.0)  # m/s, m/s, rad/s
 BASE_FENCE = 1.5  # m; the base may not leave this square around the start (floor is 2 m)
-MOUNT_Z = 0.335  # m; top of the TidyBot arm plate, where the OpenArm column stands
+BASE_TOP = 0.335  # m; top of the TidyBot arm plate
+COLUMN_SINK = 0.28  # m; the OpenArm column's foot sits inside the base, so the shoulders end up ~0.75 m high
+MOUNT_Z = BASE_TOP - COLUMN_SINK  # m; height of the OpenArm origin (column foot) above the floor
 
 
 class MujocoAdapter:

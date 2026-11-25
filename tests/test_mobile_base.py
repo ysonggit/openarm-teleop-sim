@@ -38,6 +38,19 @@ def test_arms_stand_on_the_base(adapter):
     mujoco.mj_forward(adapter.model, adapter.data)
     shoulder = adapter.data.site("arm_origin").xpos
     assert shoulder[2] == pytest.approx(0.697 + MOUNT_Z, abs=1e-6)
+    assert 0.7 < shoulder[2] < 0.8  # column sunk into the base
+
+
+def test_mounted_targets_are_reachable(adapter):
+    """The reach targets rise with the mount, so each one is still within 2 mm of IK reach."""
+    from edge.server import mounted
+    from edge.task import TARGETS
+    from edge.teleop import CartesianTeleop
+
+    t = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper, FRAME)
+    for p in mounted(TARGETS, BASE):
+        errs = [arm.ik.solve(adapter.home[arm.idx], p)[1] for arm in t.arms.values()]
+        assert min(errs) < 2e-3, p
 
 
 def test_forward_stick_drives_the_base_in_the_view_frame(teleop):

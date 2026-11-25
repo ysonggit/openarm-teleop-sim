@@ -2,7 +2,7 @@
 
 第一阶段：不用实体硬件，用 MuJoCo 里的 OpenArm v1 双臂（立柱款，16 个执行器：每臂 7 关节 + 夹爪），打通"控制指令 → 边缘安全层 → 状态反馈 → 浏览器前端"。
 
-双臂默认装在移动底盘上：[Stanford TidyBot](https://github.com/google-deepmind/mujoco_menagerie/tree/main/stanford_tidybot) 的底盘（MuJoCo Menagerie，MIT 许可，只用底盘，不含它的 Kinova 机械臂）。底盘是全向的，用 x、y、转角三个平面关节做位置控制，没有轮子物理。启动时加 `--no-base` 回到固定立柱版。
+双臂默认装在移动底盘上：[Stanford TidyBot](https://github.com/google-deepmind/mujoco_menagerie/tree/main/stanford_tidybot) 的底盘（MuJoCo Menagerie，MIT 许可，只用底盘，不含它的 Kinova 机械臂）。底盘是全向的，用 x、y、转角三个平面关节做位置控制，没有轮子物理。OpenArm 的立柱下半截（含底座支架）沉进底盘里 0.28 m，肩高约 0.75 m（`edge/mujoco_adapter.py` 里的 `COLUMN_SINK`，最多 0.30 m）。启动时加 `--no-base` 回到固定立柱版。
 
 ![浏览器里的 3D 视图：TidyBot 移动底盘上的 OpenArm 双臂、对准任务的目标点和操作面板](docs/screenshot-3d.png)
 
@@ -14,24 +14,25 @@ uv run pytest                            # 安全层、IK、遥操作、任务�
 uv run python -m edge.server             # http://127.0.0.1:8765
 ```
 
-操作顺序：Claim control → Activate（手柄 Start）→ 用手柄移动夹爪。按手柄 X（PS4 方块）或键盘 Tab 在"动手臂"和"开底盘"两种模式间切换。点 Start task 开始对准任务。没有手柄时用键盘，按键见页面里的 Controls。
+操作顺序：Claim control → Activate（手柄 Start）→ 用手柄移动夹爪。面板 Control 一行可以直接点选 Left arm / Right arm / Base；也可以按手柄 □ 或键盘 Tab 在手臂和底盘模式间切换。方向键和手柄十字键在任何模式下都直接开底盘。点 Start task 开始对准任务。没有手柄时用键盘，按键见页面里的 Controls。
 
-| 动作 | 手柄 | 键盘 |
+| 动作 | 手柄（PS4） | 键盘 |
 |---|---|---|
-| 切换手臂 / 底盘模式 | X（方块） | Tab |
+| 切换手臂 / 底盘模式 | □ | Tab |
+| 开底盘（任何模式）：前进后退 / 左右转 | 十字键 ↑↓ / ←→ | 方向键 ↑↓ / ←→ |
 | 手臂模式：夹爪左右、前后移动 | 左摇杆 | A D / W S |
 | 手臂模式：夹爪上下移动 | 右摇杆 | R / F |
-| 手臂模式：合上夹爪 | 按住 RT | 按住 G |
-| 手臂模式：切换左臂 / 右臂 | LB / RB | Q / E |
+| 手臂模式：合上夹爪 | 按住 R2 | 按住 G |
+| 切换左臂 / 右臂（回到手臂模式） | L1 / R1 | Q / E（手臂模式下） |
 | 底盘模式：底盘左右、前后平移 | 左摇杆 | A D / W S |
 | 底盘模式：原地左转 / 右转 | 右摇杆左右 | Q / E |
-| Activate / Home（只回手臂，底盘不动）/ E-stop | Start / Y / B | Enter / H / 空格 |
+| Activate / Home（只回手臂，底盘不动）/ E-stop | Options / △ / ○ | Enter / H / 空格 |
 
 画面有两个标签：**3D view**（默认）在浏览器里按关节状态画出机器人，可拖动旋转、滚轮缩放、右键平移，右上角有 Robot / Front / Left / Right / Top 预设视角；**Robot camera** 是边缘端渲染的相机画面，相机装在底盘后上方，跟着底盘走和转（将来对应真机相机）。底盘移动时 3D 视图只跟着平移、不跟着转，所以摇杆方向不会在操作中突然变；预设视角以底盘当前位置和朝向为准。3D 视图需要 WebGL，three.js 从 jsDelivr CDN 加载。
 
 方向以当前画面为准：摇杆向上 = 画面里向前，开底盘和动手臂都一样。在 3D 视图里转到哪个方向，摇杆就跟着那个方向。只控制夹爪中心的位置，不控制手腕姿态。夹爪目标记在底盘坐标系里，所以开底盘时手臂跟着车走，姿态不变。勾选 "Stop sending commands" 可模拟断网。
 
-对准任务：10 个目标点按顺序亮起（橙色），位置相对底盘起点（随底盘高度抬高 0.335 m），原地就能全部够到，暂时不需要开车；任一夹爪中心在目标 2 cm 内停留 0.5 s 算完成，变绿。页面和 `logs/` 记录每个目标的用时。
+对准任务：10 个目标点按顺序亮起（橙色），位置相对底盘起点（随安装高度抬高 0.055 m），原地就能全部够到，暂时不需要开车；任一夹爪中心在目标 2 cm 内停留 0.5 s 算完成，变绿。页面和 `logs/` 记录每个目标的用时。
 
 ## 结构（与真实边缘设备一一对应）
 

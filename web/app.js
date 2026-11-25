@@ -6,8 +6,8 @@ import { createView3D } from "./view3d.js";
 const $ = (id) => document.getElementById(id);
 const SEND_PERIOD_MS = 50;
 const DEADZONE = 0.15;
-// Standard Gamepad API button indices (X = PS4 square).
-const BTN = { B: 1, X: 2, Y: 3, LB: 4, RB: 5, RT: 7, START: 9 };
+// Standard Gamepad API button indices. Xbox names; PS4: B = ○, X = □, Y = △, LB/RB = L1/R1, RT = R2.
+const BTN = { B: 1, X: 2, Y: 3, LB: 4, RB: 5, RT: 7, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
 
 let ws, hello, state, prevUrl, seq = 0, controlling = false;
 let view3d = null, view = "3d";
@@ -106,10 +106,13 @@ function updateButtons() {
   $("task").disabled = !controlling;
 }
 
-function toggleMode() { if (hello?.base) mode = mode === "arm" ? "drive" : "arm"; }
+function setMode(m) { if (hello?.base || m === "arm") mode = m; }
+function toggleMode() { setMode(mode === "arm" ? "drive" : "arm"); }
 
-// Returns {v, grip} from gamepad or keyboard. v is [right, forward, up] for
-// an arm, [right, forward, turn right] for the base; each in -1..1.
+// Returns {v, grip, direct} from gamepad or keyboard. v is [right, forward, up]
+// for an arm, [right, forward, turn right] for the base; each in -1..1.
+// direct: base command from the arrow keys or D-pad, which drive the base in
+// either mode (null when none is held).
 function readInput() {
   const pad = [...(navigator.getGamepads?.() ?? [])].find(Boolean);
   let v = [0, 0, 0], grip = 0;
@@ -119,24 +122,29 @@ function readInput() {
     grip = pad.buttons[BTN.RT]?.value ?? 0;
     const pressed = pad.buttons.map((b) => b.pressed);
     const edge = (i) => pressed[i] && !prevPressed[i];
-    if (edge(BTN.LB)) arm = "left";
-    if (edge(BTN.RB)) arm = "right";
+    if (edge(BTN.LB)) { arm = "left"; setMode("arm"); }
+    if (edge(BTN.RB)) { arm = "right"; setMode("arm"); }
     if (edge(BTN.B)) send({ type: "estop" });
     if (edge(BTN.START)) send({ type: "activate" });
     if (edge(BTN.X)) toggleMode();
     if (edge(BTN.Y)) send({ type: "home" });
     prevPressed = pressed;
   }
-  const k = (a, b) => (keys.has(a) ? 1 : 0) - (keys.has(b) ? 1 : 0);
+  const btn = (i) => (pad?.buttons[i]?.pressed ? 1 : 0);
+  const fwd = btn(BTN.UP) - btn(BTN.DOWN) || k("ArrowUp", "ArrowDown");
+  const turn = btn(BTN.RIGHT) - btn(BTN.LEFT) || k("ArrowRight", "ArrowLeft");
+  const direct = hello?.base && (fwd || turn) ? [0, fwd, turn] : null;
   v = [v[0] || k("KeyD", "KeyA"), v[1] || k("KeyW", "KeyS"), v[2] || (mode === "drive" ? k("KeyE", "KeyQ") : k("KeyR", "KeyF"))];
   if (keys.has("KeyG")) grip = 1;
   $("device").textContent = pad ? pad.id.slice(0, 40) : "keyboard";
-  return { v, grip };
+  return { v, grip, direct };
 }
+const k = (a, b) => (keys.has(a) ? 1 : 0) - (keys.has(b) ? 1 : 0);
 
 document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { e.preventDefault(); send({ type: "estop" }); return; }
   if (e.code === "Tab") { e.preventDefault(); if (!e.repeat) toggleMode(); return; }
+  if (e.code.startsWith("Arrow")) e.preventDefault(); // drive the base, don't scroll the page
   if (e.repeat) return;
   if (mode === "arm" && e.code === "KeyQ") arm = "left";
   else if (mode === "arm" && e.code === "KeyE") arm = "right";
@@ -155,19 +163,25 @@ $("activate").onclick = () => send({ type: "activate" });
 $("home").onclick = () => send({ type: "home" });
 $("estop").onclick = () => send({ type: "estop" });
 $("task").onclick = () => send({ type: "task_start" });
+document.querySelectorAll("[data-arm]").forEach((b) => (b.onclick = () => { arm = b.dataset.arm; setMode("arm"); b.blur(); }));
+document.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { setMode(b.dataset.mode); b.blur(); }));
 document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => setView(b.dataset.view)));
 document.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => view3d?.setPreset(b.dataset.preset)));
 try { view = localStorage.getItem("view") || "3d"; } catch {}
 setView(view);
 
 setInterval(() => {
-  const { v, grip } = readInput();
-  $("arm").textContent = arm;
-  $("drive").textContent = mode === "drive" ? "drive base" : "move arm";
+  const { v, grip, direct } = readInput();
+  document.querySelectorAll("[data-arm]").forEach((b) => b.classList.toggle("on", mode === "arm" && b.dataset.arm === arm));
+  document.querySelectorAll("[data-mode]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.mode === mode);
+    b.disabled = b.dataset.mode === "drive" && !hello?.base;
+  });
   $("stick").textContent = v.map((x) => x.toFixed(2)).join(" ");
   $("grip").style.width = `${grip * 100}%`;
   if (controlling && state?.mode === "active" && !$("pause").checked) {
-    const msg = mode === "drive" ? { type: "base", seq: ++seq, v } : { type: "ee", seq: ++seq, arm, v, grip };
+    const msg = direct ? { type: "base", seq: ++seq, v: direct }
+      : mode === "drive" ? { type: "base", seq: ++seq, v } : { type: "ee", seq: ++seq, arm, v, grip };
     if (view === "3d" && view3d) msg.yaw = view3d.yaw();
     send(msg);
   }
