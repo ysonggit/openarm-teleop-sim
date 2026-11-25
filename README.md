@@ -4,7 +4,7 @@
 
 双臂默认装在移动底盘上：[Stanford TidyBot](https://github.com/google-deepmind/mujoco_menagerie/tree/main/stanford_tidybot) 的底盘（MuJoCo Menagerie，MIT 许可，只用底盘，不含它的 Kinova 机械臂）。底盘是全向的，用 x、y、转角三个平面关节做位置控制，没有轮子物理。启动时加 `--no-base` 回到固定立柱版。
 
-![浏览器里的 3D 视图：OpenArm 双臂、对准任务的目标点和操作面板](docs/screenshot-3d.png)
+![浏览器里的 3D 视图：TidyBot 移动底盘上的 OpenArm 双臂、对准任务的目标点和操作面板](docs/screenshot-3d.png)
 
 ## 运行
 
@@ -35,7 +35,7 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 
 ## 结构（与真实边缘设备一一对应）
 
-![System diagram: operator browser connects over WebSocket to the edge service; on the edge, teleop → IK → safety gate → MuJoCo](docs/system-diagram.drawio.png)
+![System diagram: operator browser connects over WebSocket to the edge service; on the edge, teleop → IK (arms) → safety gate → MuJoCo with the TidyBot base](docs/system-diagram.drawio.png)
 
 | 文件 | 作用 | 换成真机时 |
 |---|---|---|
