@@ -1,9 +1,10 @@
 """Edge process: local control loop + WebSocket bridge to the operator UI.
 
-The 100 Hz loop and the safety gate run here. The browser only sends goals
-(~20 Hz) and receives state (20 Hz) and JPEG frames (~14 fps).
+The 100 Hz loop and the safety gate run here. The browser sends gamepad
+velocities (~20 Hz); IK turns them into joint goals for the gate. The browser
+receives state (20 Hz) and JPEG frames (~14 fps).
 
-    uv run python -m edge.server [--model PATH] [--port 8765]
+    uv run python -m edge.server [--port 8765]
 """
 
 import argparse
@@ -17,6 +18,8 @@ from aiohttp import WSMsgType, web
 
 from edge.mujoco_adapter import MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
+from edge.task import RADIUS, TARGETS, ReachTask
+from edge.teleop import MAX_SPEED, TCP, CartesianTeleop
 
 ROOT = Path(__file__).resolve().parent.parent
 LOOP_DT = 0.01
@@ -35,8 +38,9 @@ class SessionLog:
 
 
 class Edge:
-    def __init__(self, adapter, gate, log):
+    def __init__(self, adapter, gate, log, teleop, task):
         self.adapter, self.gate, self.log = adapter, gate, log
+        self.teleop, self.task = teleop, task
         self.clients = {}  # ws -> client id
         self.controller = None
         self._ids = itertools.count(1)
@@ -52,6 +56,8 @@ class Edge:
             "vmax": a.vmax.tolist(),
             "home": a.home.tolist(),
             "watchdog_s": self.gate.watchdog_s,
+            "arms": list(self.teleop.arms),
+            "max_speed": MAX_SPEED,
         }
 
     def state(self):
@@ -65,6 +71,7 @@ class Edge:
             "q": q.tolist(),
             "goal": g.goal.tolist(),
             "target": g.target.tolist(),
+            "task": self.task.summary(time.monotonic()),
         }
 
     async def run(self):
@@ -76,6 +83,11 @@ class Edge:
             for mode, reason in self.gate.events:
                 self.log.write("mode", mode=mode, reason=reason)
             self.gate.events.clear()
+
+            result = self.task.tick(self.adapter.body_positions(TCP.values()), time.monotonic())
+            if result:
+                self.log.write("task", event=result, index=self.task.index, seconds=self.task.results[-1])
+                self.adapter.set_marker_colors(self.task.index if self.task.active else None, self.task.index)
 
             if tick % STATE_EVERY == 0:
                 await self._broadcast(json.dumps(self.state()))
@@ -110,6 +122,22 @@ class Edge:
             await ws.send_json({"type": "error", "error": "not_controller", "for": kind})
         elif kind == "activate":
             self.gate.activate(q_meas, now)
+            self.teleop.reset(self.gate.goal, now)
+        elif kind == "ee":
+            if self.gate.mode != ACTIVE or msg.get("arm") not in self.teleop.arms or len(msg.get("v", ())) != 3:
+                return
+            goal = self.teleop.step(self.gate.goal, msg["arm"], msg["v"], msg.get("grip", 0), now)
+            result = self.gate.command(goal, now)
+            self.log.write("ee", client=cid, seq=msg.get("seq"), arm=msg["arm"], v=msg["v"],
+                           grip=msg.get("grip", 0), result=result)
+        elif kind == "home":
+            if self.gate.mode == ACTIVE:
+                self.gate.command(self.adapter.home, now)
+                self.teleop.reset(self.adapter.home, now)
+        elif kind == "task_start":
+            self.task.start(now)
+            self.adapter.set_marker_colors(0, 0)
+            self.log.write("task", event="start", client=cid)
         elif kind == "release":
             self._release("controller released")
         elif kind == "cmd":
@@ -151,13 +179,17 @@ async def ws_handler(request):
 
 def main():
     p = argparse.ArgumentParser()
+    # Cartesian teleop uses Enactic OpenArm v1 bimanual names (see edge/teleop.py).
     p.add_argument("--model", default=ROOT / "vendor/openarm_mujoco/v1/openarm_bimanual.xml", type=Path)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", default=8765, type=int)
     args = p.parse_args()
 
-    adapter = MujocoAdapter(args.model)
-    edge = Edge(adapter, SafetyGate(adapter.lower, adapter.upper, adapter.vmax), SessionLog(ROOT / "logs"))
+    adapter = MujocoAdapter(args.model, markers=TARGETS, marker_radius=RADIUS)
+    teleop = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper,
+                             adapter.camera_frame())
+    gate = SafetyGate(adapter.lower, adapter.upper, adapter.vmax)
+    edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, ReachTask())
     print(f"session log: {edge.log.path}")
 
     app = web.Application()

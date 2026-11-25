@@ -6,22 +6,37 @@
 
 ```bash
 ./scripts/fetch_model.sh                 # 拉取 OpenArm MuJoCo 模型（固定 commit）
-uv run pytest                            # 安全层 + 仿真适配器测试
+uv run pytest                            # 安全层、IK、遥操作、任务和仿真适配器测试
 uv run python -m edge.server             # http://127.0.0.1:8765
 ```
 
-操作顺序：Claim control → Activate → 拖动滑块（按 Left arm / Right arm 分组）。单臂模型：`--model vendor/openarm_mujoco/v1/openarm.xml`。空格键 = E-stop。勾选 "Stop sending commands" 可模拟断网。
+操作顺序：Claim control → Activate（手柄 Start）→ 用手柄移动夹爪。点 Start task 开始对准任务。没有手柄时用键盘，按键见页面里的 Controls。
+
+| 动作 | 手柄 | 键盘 |
+|---|---|---|
+| 夹爪左右、前后移动 | 左摇杆 | A D / W S |
+| 夹爪上下移动 | 右摇杆 | R / F |
+| 合上夹爪 | 按住 RT | 按住 G |
+| 切换左臂 / 右臂 | LB / RB | Q / E |
+| Activate / Home / E-stop | Start / Y / B | Enter / H / 空格 |
+
+方向以画面为准：摇杆向上 = 画面里向前。只控制夹爪中心的位置，不控制手腕姿态。勾选 "Stop sending commands" 可模拟断网。
+
+对准任务：10 个目标点按顺序亮起（橙色），任一夹爪中心在目标 2 cm 内停留 0.5 s 算完成，变绿。页面和 `logs/` 记录每个目标的用时。
 
 ## 结构（与真实边缘设备一一对应）
 
 | 文件 | 作用 | 换成真机时 |
 |---|---|---|
 | `edge/mujoco_adapter.py` | 机器人替身：关节名、限位、读状态、写目标、相机画面 | 换成 ROS 2 或供应商 SDK 适配器，接口不变 |
+| `edge/ik.py` | 单臂位置 IK：阻尼最小二乘，零空间拉向初始姿态 | 换成真机的模型，算法不变 |
+| `edge/teleop.py` | 摇杆速度（画面坐标）→ 夹爪目标 → IK → 关节目标；够不到时目标不再往外跑 | 保留；关节名表按机器人改 |
+| `edge/task.py` | 对准任务：目标点、成功判定、每个目标用时 | 保留 |
 | `edge/safety.py` | 本地安全层：限位裁剪、速度限制、0.5 s 看门狗、E-stop 锁存 | 原样保留，跑在机器人本地 |
 | `edge/server.py` | 100 Hz 本地控制循环 + WebSocket；单操作员控制权；JSONL 会话日志（`logs/`） | 保留；公网暴露前必须加认证和 TLS |
-| `web/` | 操作员界面：视频、滑块、模式、RTT | 保留 |
+| `web/` | 操作员界面：视频、手柄 / 键盘输入、任务面板、模式、RTT | 保留 |
 
-协议：浏览器以 20 Hz 发送 `cmd`（目标位姿），边缘端以 20 Hz 回 `state`，约 14 fps 回 JPEG。高频伺服不经过网络。
+协议：浏览器以 20 Hz 发送 `ee`（当前手臂、三轴速度 −1…1、夹爪 0…1），边缘端以 20 Hz 回 `state`，约 14 fps 回 JPEG。发送的是速度而不是位置，所以丢一包只会短暂停顿。IK 的结果仍要经过安全层，高频伺服不经过网络。
 
 ## 已验证
 
@@ -29,6 +44,9 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 - 停发指令 0.5 s 后进入 HOLD，停在当前 setpoint；重新 Activate 时不跳变。
 - 反复 HOLD/Activate 不会因重力下垂而累积漂移。
 - E-stop 锁存，必须重新 Activate；任何连接的客户端都能触发 E-stop。
+- 满杆时夹爪按 0.15 m/s 移动；消息间隔超过 0.1 s 不补算；目标够不到时不会越跑越远。
+- 10 个目标点都在 IK 可达范围内（误差 ≤ 2 mm）。
+- 浏览器中用模拟手柄跑通：完成第 1 个目标；手柄 B 触发 E-stop，Start 恢复。
 
 ## 这一阶段证明不了的
 
@@ -37,4 +55,4 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 - 底盘、拖管等浇水任务本身的物理难点（这里只有固定立柱上的双臂）。
 - 视频走 WebSocket JPEG，只适合仿真；跨洋链路需要换成 WebRTC。
 
-运行原理图解（中文）：[docs/运行原理.html](docs/运行原理.html)
+运行原理图解（中文，滑块版，尚未更新为手柄版）：[docs/运行原理.html](docs/运行原理.html)

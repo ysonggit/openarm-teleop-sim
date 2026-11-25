@@ -17,7 +17,16 @@ button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; b
 button:disabled { opacity: .4; cursor: default; }
 button.estop { background: var(--stop); color: #fff; border-color: var(--stop); font-weight: 600; }
 .drop { display: block; margin-bottom: 12px; color: var(--muted); }
-#joints h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
-.joint {display: grid; grid-template-columns: 90px 1fr 120px; gap: 8px; align-items: center; margin: 4px 0; }
-.joint input { width: 100%; }
-.joint code { font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+h3 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.kv { display: grid; grid-template-columns: 100px 1fr; gap: 4px 12px; align-items: center; }
+.kv code, .joint code { font-size: 12px; font-variant-numeric: tabular-nums; }
+.bar { display: block; height: 8px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--hold); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.chips span { font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+details { margin-top: 14px; }
+summary { cursor: pointer; color: var(--muted); }
+.help { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.help th, .help td { text-align: left; padding: 2px 8px 2px 0; }
+.joint { display: grid; grid-template-columns: 1fr 140px; gap: 8px; margin: 2px 0; }
+.joint code { color: var(--muted); text-align: right; }

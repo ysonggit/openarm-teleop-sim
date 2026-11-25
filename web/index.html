@@ -21,10 +21,44 @@
         <button id="claim">Claim control</button>
         <button id="activate" disabled>Activate</button>
         <button id="home" disabled>Home</button>
-        <button id="estop" class="estop">E-STOP (space)</button>
+        <button id="estop" class="estop">E-STOP</button>
       </div>
       <label class="drop"><input type="checkbox" id="pause"> Stop sending commands (simulate link loss)</label>
-      <div id="joints"></div>
+
+      <h3>Input</h3>
+      <div class="kv">
+        <span>Device</span><b id="device">keyboard</b>
+        <span>Active arm</span><b id="arm">left</b>
+        <span>Stick</span><code id="stick">0 0 0</code>
+        <span>Grip</span><span class="bar"><i id="grip"></i></span>
+      </div>
+
+      <h3>Reach task</h3>
+      <div class="buttons"><button id="task" disabled>Start task</button></div>
+      <div class="kv">
+        <span>Target</span><b id="t-index">—</b>
+        <span>This target</span><code id="t-elapsed">—</code>
+        <span>Distance</span><code id="t-dist">—</code>
+      </div>
+      <div id="t-results" class="chips"></div>
+
+      <details>
+        <summary>Controls</summary>
+        <table class="help">
+          <tr><th></th><th>Gamepad</th><th>Keyboard</th></tr>
+          <tr><td>Move left / right, fwd / back</td><td>Left stick</td><td>A D / W S</td></tr>
+          <tr><td>Up / down</td><td>Right stick</td><td>R / F</td></tr>
+          <tr><td>Close gripper</td><td>RT (hold)</td><td>G (hold)</td></tr>
+          <tr><td>Left / right arm</td><td>LB / RB</td><td>Q / E</td></tr>
+          <tr><td>Activate</td><td>Start</td><td>Enter</td></tr>
+          <tr><td>Home</td><td>Y</td><td>H</td></tr>
+          <tr><td>E-STOP</td><td>B</td><td>Space</td></tr>
+        </table>
+      </details>
+      <details>
+        <summary>Joints (measured → setpoint)</summary>
+        <div id="joints"></div>
+      </details>
     </section>
   </main>
   <script src="app.js"></script>
