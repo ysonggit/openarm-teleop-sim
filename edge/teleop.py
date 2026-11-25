@@ -11,13 +11,17 @@ along when the base drives. The base itself is three more joint goals
 import numpy as np
 
 from edge.ik import ArmIK
-from edge.mujoco_adapter import BASE_JOINTS
+from edge.mujoco_adapter import BASE_HALF_WIDTH, BASE_JOINTS, BASE_TOP
 
 MAX_SPEED = 0.15  # m/s at full stick
 BASE_SPEED = 0.4  # m/s at full stick
 BASE_TURN = 0.8  # rad/s at full stick
 MAX_DT = 0.1  # longest gap integrated per message; longer gaps are not "caught up"
 REACH_SLACK = 0.01  # m; beyond this the target snaps back to what the arm reached
+# Keep-out for the gripper center (TCP, ~1 cm above the fingertips), in the base frame.
+FLOOR_Z = 0.03  # fingertips stay ~2 cm above the floor
+KEEP_OUT_XY = BASE_HALF_WIDTH + 0.05  # over the base footprint, with room for the fingers
+KEEP_OUT_TOP = BASE_TOP + 0.06  # fingertips stay ~5 cm above the base top
 
 # Enactic OpenArm v1 bimanual naming. Another robot needs its own table here.
 ARM_JOINTS = {side: [f"{side}_joint{i}_ctrl" for i in range(1, 8)] for side in ("left", "right")}
@@ -77,6 +81,19 @@ class CartesianTeleop:
         goal[ith] -= v[2] * BASE_TURN * dt
         return goal
 
+    def _keep_out(self, prev, target):
+        """Stop the gripper above the floor and above the base: coming down onto the
+        base it stops at KEEP_OUT_TOP; coming in from the side below that, at the edge."""
+        target = np.array(target, float)
+        if self.base is not None:
+            over_base = lambda p: np.all(np.abs(p[:2]) < KEEP_OUT_XY)
+            if over_base(target) and prev[2] < KEEP_OUT_TOP and not over_base(prev):
+                target[:2] = prev[:2]
+            if over_base(target):
+                target[2] = max(target[2], KEEP_OUT_TOP)
+        target[2] = max(target[2], FLOOR_Z)
+        return target
+
     def home(self, goal, home):
         """Home the arms; the base stays where it is."""
         out = np.array(home, float)
@@ -99,7 +116,8 @@ class CartesianTeleop:
         dt = self._dt(now)
 
         to_base = rot_z(self._base_yaw(goal)).T
-        target = self.targets[side] + to_base @ self._view(goal, yaw) @ np.clip(v, -1, 1) * MAX_SPEED * dt
+        prev = self.targets[side]
+        target = self._keep_out(prev, prev + to_base @ self._view(goal, yaw) @ np.clip(v, -1, 1) * MAX_SPEED * dt)
         q, err = arm.ik.solve(goal[arm.idx], target)
         if err > REACH_SLACK:
             target = arm.ik.fk(q)

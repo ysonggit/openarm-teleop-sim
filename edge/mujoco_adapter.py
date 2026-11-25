@@ -22,7 +22,10 @@ BASE_JOINTS = ("joint_x", "joint_y", "joint_th")
 BASE_VMAX = (0.5, 0.5, 1.0)  # m/s, m/s, rad/s
 BASE_FENCE = 1.5  # m; the base may not leave this square around the start (floor is 2 m)
 BASE_TOP = 0.335  # m; top of the TidyBot arm plate
-COLUMN_SINK = 0.28  # m; the OpenArm column's foot sits inside the base, so the shoulders end up ~0.75 m high
+BASE_HALF_WIDTH = 0.241  # m; the TidyBot bumper is a 0.48 m square
+COLUMN_SINK = 0.18  # m; the OpenArm column's foot sits inside the base, so the shoulders end up ~0.85 m high.
+# Arms hanging straight down reach 0.63 m below the shoulder, so below ~1.0 m they would touch
+# the base top; teleop keeps the grippers out of that zone instead (see edge/teleop.py).
 MOUNT_Z = BASE_TOP - COLUMN_SINK  # m; height of the OpenArm origin (column foot) above the floor
 
 
