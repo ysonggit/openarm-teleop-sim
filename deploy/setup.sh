@@ -46,7 +46,7 @@ cat > /usr/local/bin/teleop-invite <<EOF
 #!/usr/bin/env bash
 # teleop-invite add "Name, Company" | list | revoke "Name, Company"
 set -euo pipefail
-out=\$(sudo -u teleop $APP/.venv/bin/python -m edge.access $CODES "\$@")
+out=\$(sudo -u teleop env PYTHONPATH=$APP $APP/.venv/bin/python -m edge.access $CODES "\$@")
 if [ "\${1:-}" = add ]; then echo "https://$SITE\$out"; else echo "\$out"; fi
 EOF
 chmod 755 /usr/local/bin/teleop-invite
