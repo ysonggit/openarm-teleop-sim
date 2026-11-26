@@ -11,7 +11,7 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from edge import greenhouse
+from edge import greenhouse, rgbd
 
 ARM_VMAX = 1.0  # rad/s, conservative for teleop
 GRIPPER_VMAX = 0.05  # m/s
@@ -44,7 +44,10 @@ class MujocoAdapter:
             type=mujoco.mjtGeom.mjGEOM_PLANE, size=[2, 2, 0.05], rgba=[0.55, 0.5, 0.42, 1]
         )
         spec.worldbody.add_light(pos=[0, 0, 2], dir=[0, 0, -1])
+        spec.visual.headlight.ambient = [0.35] * 3  # greenhouse daylight for the rendered cameras
+        spec.visual.headlight.diffuse = [0.55] * 3
         berries = greenhouse.build(spec, self.mount_z, base_path is not None) if greenhouse_rows else []
+        rgbd.add_camera(spec)
         with warnings.catch_warnings():  # attach() with an empty prefix keeps the arm's names
             warnings.simplefilter("ignore")
             self.model = spec.compile()
@@ -81,6 +84,7 @@ class MujocoAdapter:
         # (see render_jpeg): GPU readback can take 100s of ms and must not stall control.
         self.size = (height, width)
         self._render = None
+        self._rgbd = None
         # Steep view from behind the robot, which faces +x. Height is hard to
         # judge from here; that is part of what the pick task measures.
         # On the mobile base it rides along like a chase camera (see _follow_base).
@@ -185,6 +189,23 @@ class MujocoAdapter:
     def set_berry_colors(self, active, done):
         for i, gid in enumerate(self.berry_ids):
             self.model.geom_rgba[gid] = BERRY_ACTIVE if i == active else BERRY_DONE if i < done else BERRY_IDLE
+
+    def render_rgbd(self, qpos=None):
+        """Head camera for a snapshot of qpos: (RGB uint8 HxWx3, depth in m HxW).
+        Same threading rule as render_jpeg."""
+        if self._rgbd is None:
+            self._rgbd = mujoco.Renderer(self.model, rgbd.HEIGHT, rgbd.WIDTH), mujoco.MjData(self.model)
+        renderer, d = self._rgbd
+        d.qpos[:] = self.data.qpos if qpos is None else qpos
+        mujoco.mj_kinematics(self.model, d)
+        mujoco.mj_comPos(self.model, d)
+        mujoco.mj_camlight(self.model, d)  # camera poses aren't part of mj_kinematics
+        renderer.update_scene(d, camera=rgbd.NAME)
+        color = renderer.render().copy()
+        renderer.enable_depth_rendering()
+        depth = renderer.render().copy()
+        renderer.disable_depth_rendering()
+        return color, depth
 
     def render_jpeg(self, qpos=None, quality=70):
         """Robot camera frame for a snapshot of qpos (default: now). Always call it from

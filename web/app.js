@@ -165,6 +165,7 @@ $("activate").onclick = () => send({ type: "activate" });
 $("home").onclick = () => send({ type: "home" });
 $("estop").onclick = () => send({ type: "estop" });
 $("task").onclick = () => send({ type: "task_start" });
+$("rgbd-open").onclick = () => window.open("rgbd.html", "rgbd", "popup,width=840,height=480");
 document.querySelectorAll("[data-arm]").forEach((b) => (b.onclick = () => { arm = b.dataset.arm; setMode("arm"); b.blur(); }));
 document.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { setMode(b.dataset.mode); b.blur(); }));
 document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => setView(b.dataset.view)));

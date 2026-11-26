@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Head RGB-D</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .rgbd { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 16px; }
+    @media (max-width: 640px) { .rgbd { grid-template-columns: 1fr; } }
+    .rgbd figure { margin: 0; min-width: 0; }
+    .rgbd figcaption { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; min-height: 24px; }
+    .rgbd img, .cloud { width: 100%; aspect-ratio: 4 / 3; display: block; background: #000; border-radius: 6px; }
+    .rgbd img { cursor: crosshair; }
+    .cloud { background: var(--view-bg); overflow: hidden; touch-action: none; }
+    .cloud canvas { display: block; width: 100% !important; height: 100% !important; }
+    .legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .legend i { flex: 1; height: 8px; border-radius: 4px; }
+    .readout { padding: 0 16px 12px; font: 12px/1.5 ui-monospace, monospace; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Head RGB-D</strong>
+    <span id="link" class="pill">connecting…</span>
+    <span id="fps">— fps</span>
+    <span id="intr" class="hint" style="margin: 0"></span>
+  </header>
+  <section class="rgbd">
+    <figure><figcaption>Color</figcaption><img id="color" alt="head camera color"></figure>
+    <figure>
+      <figcaption>
+        Point cloud <span id="npts"></span>
+        <span class="seg" style="margin-left: auto">
+          <button data-color="rgb">RGB</button><button data-color="depth">Depth</button><button id="sensor-view">Sensor view</button>
+        </span>
+      </figcaption>
+      <div id="cloud" class="cloud"></div>
+      <div id="legend" class="legend" hidden><span id="dmin"></span><i id="ramp"></i><span id="dmax"></span></div>
+    </figure>
+  </section>
+  <div id="readout" class="readout">Drag the cloud to orbit, scroll to zoom. Hover the color image for depth and the 3D point (camera frame: x right, y down, z forward).</div>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
+  <script type="module" src="rgbd.js"></script>
+</body>
+</html>

@@ -3,7 +3,9 @@
 The 100 Hz loop and the safety gate run here. The browser sends gamepad
 velocities (~20 Hz); IK turns them into joint goals for the gate. The browser
 receives state (20 Hz, incl. body poses for the 3D view) and JPEG frames
-(~14 fps). The arms stand on a mobile base unless --no-base is given.
+(~14 fps, only to clients showing the robot camera); the head RGB-D camera
+streams on its own WebSocket, /rgbd, to view-only clients (web/rgbd.html).
+The arms stand on a mobile base unless --no-base is given.
 
     uv run python -m edge.server [--port 8765] [--no-base]
 """
@@ -20,6 +22,7 @@ from pathlib import Path
 import numpy as np
 from aiohttp import WSMsgType, web
 
+from edge import rgbd
 from edge.mujoco_adapter import BERRY_ACTIVE, BERRY_DONE, BERRY_IDLE, MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
 from edge.scene import body_poses, export_scene
@@ -30,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LOOP_DT = 0.01
 STATE_EVERY = 5  # ticks -> 20 Hz
 VIDEO_EVERY = 7  # ticks -> ~14 fps
+RGBD_EVERY = 10  # ticks -> at most 10 fps; in practice limited by render time
 
 
 class SessionLog:
@@ -50,6 +54,8 @@ class Edge:
         self.watching = set()  # clients showing the robot camera; only they get JPEG frames
         self._renderer = ThreadPoolExecutor(1, thread_name_prefix="render")
         self._frame = None  # pending render
+        self.rgbd_clients = set()  # view-only /rgbd connections
+        self._rgbd = None
         self.controller = None
         self._ids = itertools.count(1)
 
@@ -111,6 +117,8 @@ class Edge:
                 await self._broadcast(json.dumps(self.state()))
             if tick % VIDEO_EVERY == 0 and self.watching and (self._frame is None or self._frame.done()):
                 self._frame = asyncio.create_task(self._send_frame(self.adapter.data.qpos.copy()))
+            if tick % RGBD_EVERY == 0 and self.rgbd_clients and (self._rgbd is None or self._rgbd.done()):
+                self._rgbd = asyncio.create_task(self._send_rgbd(self.adapter.data.qpos.copy()))
 
             next_t += LOOP_DT
             await asyncio.sleep(max(0.0, next_t - time.monotonic()))
@@ -120,6 +128,17 @@ class Edge:
         jpeg = await asyncio.get_running_loop().run_in_executor(self._renderer, self.adapter.render_jpeg, qpos)
         await self._broadcast(jpeg, self.watching)
 
+    async def _send_rgbd(self, qpos):
+        """Color + depth for one snapshot, rendered and packed on the render thread."""
+        frame = await asyncio.get_running_loop().run_in_executor(
+            self._renderer, lambda: rgbd.pack(*self.adapter.render_rgbd(qpos)))
+        await self._broadcast(frame, self.rgbd_clients)
+
+    def rgbd_hello(self):
+        return {"type": "rgbd_hello", "camera": rgbd.NAME, **rgbd.intrinsics(), "pitch": rgbd.PITCH,
+                "near": rgbd.NEAR, "far": rgbd.FAR,
+                "depth_unit": 0.001, "fps_max": round(1 / (RGBD_EVERY * LOOP_DT))}
+
     async def _broadcast(self, payload, targets=None):
         for ws in list(self.clients if targets is None else targets):
             try:
@@ -127,6 +146,7 @@ class Edge:
             except ConnectionError:
                 self.clients.pop(ws, None)
                 self.watching.discard(ws)
+                self.rgbd_clients.discard(ws)
 
     async def handle(self, ws, msg):
         kind, cid, now = msg.get("type"), self.clients[ws], time.monotonic()
@@ -214,11 +234,26 @@ async def ws_handler(request):
     return ws
 
 
+async def rgbd_handler(request):
+    """View-only head RGB-D stream; needs no control, sends nothing back."""
+    edge = request.app["edge"]
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    await ws.send_json(edge.rgbd_hello())
+    edge.rgbd_clients.add(ws)
+    try:
+        async for _ in ws:
+            pass
+    finally:
+        edge.rgbd_clients.discard(ws)
+    return ws
+
+
 @web.middleware
 async def no_stale_ui(request, handler):
     """Make browsers revalidate UI files, so an updated app.js is never skipped."""
     resp = await handler(request)
-    if request.path != "/ws":
+    if request.path not in ("/ws", "/rgbd"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -251,6 +286,7 @@ def main():
     app = web.Application(middlewares=[no_stale_ui])
     app["edge"] = edge
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/rgbd", rgbd_handler)
     app.router.add_get("/scene.json", lambda r: web.json_response(meta))
     app.router.add_get("/scene.bin", lambda r: web.Response(body=blob, content_type="application/octet-stream"))
     app.router.add_get("/", lambda r: web.FileResponse(ROOT / "web/index.html"))

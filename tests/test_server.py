@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -34,9 +35,11 @@ def test_a_slow_camera_frame_never_stalls_the_control_loop(tmp_path):
     edge = Edge(a, SafetyGate(a.lower, a.upper, a.vmax), SessionLog(tmp_path),
                 CartesianTeleop(a.model, a.names, a.home, a.lower, a.upper, frame), HarvestTask(a.berry_start))
     a.render_jpeg = lambda qpos: (time.sleep(1.0), b"jpeg")[1]
-    viewer, watcher = FakeWS(), FakeWS()
+    a.render_rgbd = lambda qpos: (time.sleep(0.2), (np.zeros((240, 320, 3), np.uint8), np.ones((240, 320))))[1]
+    viewer, watcher, head = FakeWS(), FakeWS(), FakeWS()
     edge.clients = {viewer: 1, watcher: 2}
     edge.watching = {watcher}
+    edge.rgbd_clients = {head}
 
     async def run_for(seconds):
         loop = asyncio.create_task(edge.run())
@@ -46,3 +49,5 @@ def test_a_slow_camera_frame_never_stalls_the_control_loop(tmp_path):
     asyncio.run(run_for(1.3))
     assert viewer.text >= 15  # ~20 Hz state for 1.3 s despite a 1 s render in flight
     assert watcher.frames == 1 and viewer.frames == 0  # frames only to clients showing the camera
+    assert head.frames >= 1 and head.text == 0  # RGB-D only on /rgbd, sharing the render thread
+    json.dumps(edge.rgbd_hello(), allow_nan=False)
