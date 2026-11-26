@@ -93,3 +93,92 @@ def test_idle_controller_is_released_but_keepalives_do_not_count(tmp_path, monke
     asyncio.run(scenario())
     assert edge.controller is None
     assert {"type": "control", "granted": False, "reason": "idle"} in driver.sent
+
+
+def _ws_app(tmp_path):
+    import numpy as np
+    from aiohttp import web
+
+    from edge.mujoco_adapter import MujocoAdapter
+    from edge.safety import SafetyGate
+    from edge.server import Edge, SessionLog, rgbd_handler, ws_handler
+    from edge.task import HarvestTask
+    from edge.teleop import CartesianTeleop
+
+    a = MujocoAdapter(MODEL)
+    frame = np.column_stack([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    edge = Edge(a, SafetyGate(a.lower, a.upper, a.vmax), SessionLog(tmp_path),
+                CartesianTeleop(a.model, a.names, a.home, a.lower, a.upper, frame), HarvestTask(a.berry_start))
+    app = web.Application()
+    app["edge"] = edge
+    app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/rgbd", rgbd_handler)
+    return app, edge
+
+
+def _run(app, scenario):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    async def go():
+        async with TestClient(TestServer(app)) as client:
+            await scenario(client)
+    asyncio.run(go())
+
+
+def test_non_finite_numbers_never_reach_the_safety_gate(tmp_path):
+    """Python's json accepts NaN/Infinity and np.clip passes NaN through; the driver
+    must not be able to turn the joint goal into NaN."""
+    import numpy as np
+
+    app, edge = _ws_app(tmp_path)
+
+    async def scenario(client):
+        ws = await client.ws_connect("/ws")
+        await ws.receive_json()  # hello
+        await ws.send_json({"type": "claim"})
+        await ws.send_json({"type": "activate"})
+        for raw in ('{"type":"ee","arm":"left","v":[NaN,0,0],"seq":1}',
+                    '{"type":"ee","arm":"left","v":[1e999,0,0],"seq":2}',
+                    '{"type":"base","v":[0,Infinity,0]}',
+                    '{"type":"ee","arm":"left","v":[0.5,0,0],"grip":NaN}',
+                    '[1,2,3]', 'not json'):
+            await ws.send_str(raw)
+        await ws.send_json({"type": "ping", "t": 1})
+        while (m := await ws.receive_json(timeout=5))["type"] != "pong":
+            pass
+        assert np.isfinite(edge.gate.goal).all()
+        await ws.close()
+
+    _run(app, scenario)
+
+
+def test_connection_caps_and_message_flood(tmp_path, monkeypatch):
+    import aiohttp
+
+    from edge import server
+
+    monkeypatch.setattr(server, "MAX_CLIENTS", 2)
+    monkeypatch.setattr(server, "MAX_RGBD_CLIENTS", 1)
+    app, edge = _ws_app(tmp_path)
+
+    async def scenario(client):
+        a, b = await client.ws_connect("/ws"), await client.ws_connect("/ws")
+        with pytest.raises(aiohttp.WSServerHandshakeError) as e:
+            await client.ws_connect("/ws")
+        assert e.value.status == 503
+        await client.ws_connect("/rgbd")
+        with pytest.raises(aiohttp.WSServerHandshakeError):
+            await client.ws_connect("/rgbd")
+
+        await b.receive_json()  # hello
+        for i in range(server.MAX_MSG_PER_S * 3):
+            await b.send_json({"type": "ping", "t": i})
+        while (m := await b.receive(timeout=5)).type not in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
+            pass
+        assert b.close_code == 1008
+        await asyncio.sleep(0.05)
+        assert len(edge.clients) == 1  # the flooder is gone; the other client stays
+        c = await client.ws_connect("/ws")  # and its slot is free again
+        await c.close(); await a.close()
+
+    _run(app, scenario)

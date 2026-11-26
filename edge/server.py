@@ -35,6 +35,37 @@ STATE_EVERY = 5  # ticks -> 20 Hz
 VIDEO_EVERY = 7  # ticks -> ~14 fps
 RGBD_EVERY = 10  # ticks -> at most 10 fps; in practice limited by render time
 IDLE_RELEASE_S = 180  # control is released after this long without operator input, so a left-open tab can't hog it
+# Limits for a server on the internet (a leaked invite link or a buggy client must not take it down):
+MAX_CLIENTS = 30  # /ws connections; each costs ~60 KB/s of state
+MAX_RGBD_CLIENTS = 6  # /rgbd connections; each costs ~175 KB/s
+MAX_MSG_BYTES = 16 * 1024  # real messages are < 200 bytes
+MAX_MSG_PER_S = 100  # the UI sends ~25/s; a client above this is closed (1008)
+
+
+def _reject(token):
+    raise ValueError(f"non-finite number {token}")
+
+
+def _finite(s):
+    x = float(s)
+    if not math.isfinite(x):  # 1e999 parses to inf
+        _reject(s)
+    return x
+
+
+def parse_message(data):
+    """A client message as a dict, or None if malformed. NaN/Infinity are refused here:
+    np.clip passes NaN through, so it would otherwise reach the joint goal."""
+    try:
+        msg = json.loads(data, parse_constant=_reject, parse_float=_finite)
+    except ValueError:
+        return None
+    return msg if isinstance(msg, dict) else None
+
+
+def _seq(msg):  # logged per command; only a client counter, never arbitrary client data
+    s = msg.get("seq")
+    return s if isinstance(s, int) else None
 
 
 class SessionLog:
@@ -197,11 +228,11 @@ class Edge:
             if kind == "base":
                 goal = self.teleop.drive(self.gate.goal, msg["v"], now, yaw=yaw)
                 result = self.gate.command(goal, now)
-                self.log.write("base", client=cid, seq=msg.get("seq"), v=msg["v"], yaw=yaw, result=result)
+                self.log.write("base", client=cid, seq=_seq(msg), v=msg["v"], yaw=yaw, result=result)
                 return
             goal = self.teleop.step(self.gate.goal, msg["arm"], msg["v"], msg.get("grip", 0), now, yaw=yaw)
             result = self.gate.command(goal, now)
-            self.log.write("ee", client=cid, seq=msg.get("seq"), arm=msg["arm"], v=msg["v"],
+            self.log.write("ee", client=cid, seq=_seq(msg), arm=msg["arm"], v=msg["v"],
                            grip=msg.get("grip", 0), yaw=yaw, result=result)
         elif kind == "home":  # arms only; the base stays put
             if self.gate.mode == ACTIVE:
@@ -221,7 +252,7 @@ class Edge:
             except (KeyError, ValueError) as e:
                 await ws.send_json({"type": "error", "error": str(e), "for": kind})
                 return
-            self.log.write("cmd", client=cid, seq=msg.get("seq"), q=msg["q"], result=result)
+            self.log.write("cmd", client=cid, seq=_seq(msg), q=msg["q"], result=result)
 
     def _release(self, reason):
         self.controller = None
@@ -238,16 +269,32 @@ class Edge:
 
 async def ws_handler(request):
     edge = request.app["edge"]
-    ws = web.WebSocketResponse()
+    if len(edge.clients) >= MAX_CLIENTS:
+        return web.Response(status=503, text="server full")
+    ws = web.WebSocketResponse(max_msg_size=MAX_MSG_BYTES, heartbeat=30)
     await ws.prepare(request)
     cid = next(edge._ids)
     edge.clients[ws] = cid
     edge.log.write("connect", client=cid, who=request.get("who"))  # invite label; no IP addresses
     await ws.send_json(edge.hello(cid))
+    window, count = time.monotonic(), 0
     try:
         async for msg in ws:
-            if msg.type == WSMsgType.TEXT:
-                await edge.handle(ws, json.loads(msg.data))
+            if msg.type != WSMsgType.TEXT:
+                continue
+            now = time.monotonic()
+            window, count = (window, count + 1) if now - window < 1 else (now, 1)
+            if count > MAX_MSG_PER_S:
+                edge.log.write("flood", client=cid)
+                await ws.close(code=1008, message=b"too many messages")
+                break
+            m = parse_message(msg.data)
+            if m is None:
+                continue
+            try:
+                await edge.handle(ws, m)
+            except (TypeError, ValueError, KeyError, IndexError):  # wrong field types: drop the message
+                pass
     finally:
         edge.disconnect(ws)
     return ws
@@ -256,7 +303,9 @@ async def ws_handler(request):
 async def rgbd_handler(request):
     """View-only head RGB-D stream; needs no control, sends nothing back."""
     edge = request.app["edge"]
-    ws = web.WebSocketResponse()
+    if len(edge.rgbd_clients) >= MAX_RGBD_CLIENTS:
+        return web.Response(status=503, text="server full")
+    ws = web.WebSocketResponse(max_msg_size=1024, heartbeat=30)
     await ws.prepare(request)
     await ws.send_json(edge.rgbd_hello())
     edge.rgbd_clients.add(ws)
