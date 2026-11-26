@@ -26,9 +26,9 @@ fi
 echo "== app at $REF"
 id teleop >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin teleop
 [ -d "$APP/.git" ] || git clone -q "$REPO" "$APP"
-git -C "$APP" fetch -q origin
-git -C "$APP" checkout -q "$REF"
-git -C "$APP" pull -q --ff-only 2>/dev/null || true  # when REF is a branch
+git -c safe.directory="$APP" -C "$APP" fetch -q origin
+git -c safe.directory="$APP" -C "$APP" checkout -q "$REF"
+git -c safe.directory="$APP" -C "$APP" pull -q --ff-only 2>/dev/null || true  # when REF is a branch
 mkdir -p "$APP/logs"
 chown -R teleop:teleop "$APP"
 sudo -u teleop -H bash -c "cd $APP && uv sync --frozen -q && ./scripts/fetch_model.sh"
