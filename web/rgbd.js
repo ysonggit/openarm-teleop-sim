@@ -54,7 +54,7 @@ renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, came
 
 // --- stream -----------------------------------------------------------------
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/rgbd`);
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/rgbd`);
   ws.binaryType = "arraybuffer";
   ws.onopen = () => setLink("connected", "active");
   ws.onclose = () => { setLink("disconnected", "estop"); setTimeout(connect, 1000); };

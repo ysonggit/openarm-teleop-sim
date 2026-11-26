@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenArm teleop sim (hosted demo)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=teleop
+WorkingDirectory=/opt/openarm-teleop-sim
+# No GPU on the instance: MuJoCo renders the camera streams in software (Mesa).
+Environment=MUJOCO_GL=osmesa
+Environment=PYOPENGL_PLATFORM=osmesa
+Environment=MESA_SHADER_CACHE_DISABLE=true
+# Only Caddy on the same host talks to it; invite codes are checked here.
+ExecStart=/opt/openarm-teleop-sim/.venv/bin/python -m edge.server --host 127.0.0.1 --port 8765 --codes /etc/openarm-teleop/codes.txt
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

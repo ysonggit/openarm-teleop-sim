@@ -16,7 +16,7 @@ const keys = new Set();
 let prevPressed = [];
 
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.binaryType = "blob";
   ws.onopen = () => { setLink("connected", "active"); send({ type: "view", video: view === "cam" }); };
   ws.onclose = () => { setLink("disconnected", "estop"); controlling = false; updateButtons(); setTimeout(connect, 1000); };
@@ -37,7 +37,13 @@ function onJson(m) {
   if (m.type === "hello") { hello = m; buildJoints(); init3D(); $("t-far").hidden = !hello.base; }
   else if (m.type === "state") onState(m);
   else if (m.type === "pong") $("rtt").textContent = `RTT ${(performance.now() - m.t).toFixed(1)} ms`;
-  else if (m.type === "control") { controlling = m.granted; if (!m.granted) alert("Another operator has control."); updateButtons(); }
+  else if (m.type === "control") {
+    controlling = m.granted;
+    if (!m.granted) alert(m.reason === "idle"
+      ? `Control was released after ${Math.round(hello.idle_release_s / 60)} min without input. Claim it again to continue.`
+      : `Someone else is driving right now. You can watch; control frees up when they release it or after ${Math.round(hello.idle_release_s / 60)} min idle.`);
+    updateButtons();
+  }
   else if (m.type === "error") console.warn("edge error", m);
 }
 

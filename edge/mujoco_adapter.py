@@ -190,6 +190,13 @@ class MujocoAdapter:
         for i, gid in enumerate(self.berry_ids):
             self.model.geom_rgba[gid] = BERRY_ACTIVE if i == active else BERRY_DONE if i < done else BERRY_IDLE
 
+    def close_renderers(self):
+        """Free the GL contexts; call it on the thread that rendered (freeing them elsewhere crashes)."""
+        for pair in (self._render, self._rgbd):
+            if pair is not None:
+                pair[0].close()
+        self._render = self._rgbd = None
+
     def render_rgbd(self, qpos=None):
         """Head camera for a snapshot of qpos: (RGB uint8 HxWx3, depth in m HxW).
         Same threading rule as render_jpeg."""

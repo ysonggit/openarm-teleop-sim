@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from aiohttp import WSMsgType, web
 
-from edge import rgbd
+from edge import access, rgbd
 from edge.mujoco_adapter import BERRY_ACTIVE, BERRY_DONE, BERRY_IDLE, MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
 from edge.scene import body_poses, export_scene
@@ -34,6 +34,7 @@ LOOP_DT = 0.01
 STATE_EVERY = 5  # ticks -> 20 Hz
 VIDEO_EVERY = 7  # ticks -> ~14 fps
 RGBD_EVERY = 10  # ticks -> at most 10 fps; in practice limited by render time
+IDLE_RELEASE_S = 180  # control is released after this long without operator input, so a left-open tab can't hog it
 
 
 class SessionLog:
@@ -57,6 +58,7 @@ class Edge:
         self.rgbd_clients = set()  # view-only /rgbd connections
         self._rgbd = None
         self.controller = None
+        self.last_input = 0.0  # time of the controller's last real input
         self._ids = itertools.count(1)
 
     def hello(self, cid):
@@ -75,6 +77,7 @@ class Edge:
             "base": None if a.base_qadr is None else
                     {"body": a.model.body("base_link").id, "speed": BASE_SPEED, "turn": BASE_TURN},
             "camera": a.camera_params(),
+            "idle_release_s": IDLE_RELEASE_S,
             "berries": {"ids": a.berry_ids, "idle": BERRY_IDLE, "active": BERRY_ACTIVE, "done": BERRY_DONE},
         }
 
@@ -120,8 +123,20 @@ class Edge:
             if tick % RGBD_EVERY == 0 and self.rgbd_clients and (self._rgbd is None or self._rgbd.done()):
                 self._rgbd = asyncio.create_task(self._send_rgbd(self.adapter.data.qpos.copy()))
 
+            if self.controller is not None and time.monotonic() - self.last_input > IDLE_RELEASE_S:
+                await self._release_idle()
+
             next_t += LOOP_DT
             await asyncio.sleep(max(0.0, next_t - time.monotonic()))
+
+    async def _release_idle(self):
+        ws = self.controller
+        self._release("idle: control released")
+        self.log.write("release", client=self.clients.get(ws), reason="idle")
+        try:
+            await ws.send_json({"type": "control", "granted": False, "reason": "idle"})
+        except ConnectionError:
+            pass
 
     async def _send_frame(self, qpos):
         """Render off the control loop; a slow frame only lowers the frame rate."""
@@ -151,6 +166,9 @@ class Edge:
     async def handle(self, ws, msg):
         kind, cid, now = msg.get("type"), self.clients[ws], time.monotonic()
         q_meas = self.adapter.read()[0]
+        if ws is self.controller and (kind in ("activate", "home", "task_start", "cmd") or (
+                kind in ("ee", "base") and (any(msg.get("v") or ()) or msg.get("grip")))):
+            self.last_input = now  # zero-velocity keepalives don't count as input
 
         if kind == "ping":
             await ws.send_json({"type": "pong", "t": msg.get("t")})
@@ -160,6 +178,7 @@ class Edge:
             granted = self.controller in (None, ws)
             if granted:
                 self.controller = ws
+                self.last_input = now
             self.log.write("claim", client=cid, granted=granted)
             await ws.send_json({"type": "control", "granted": granted})
         elif kind == "estop":  # any connected client may stop the robot
@@ -223,7 +242,7 @@ async def ws_handler(request):
     await ws.prepare(request)
     cid = next(edge._ids)
     edge.clients[ws] = cid
-    edge.log.write("connect", client=cid, peer=request.remote)
+    edge.log.write("connect", client=cid, who=request.get("who"))  # invite label; no IP addresses
     await ws.send_json(edge.hello(cid))
     try:
         async for msg in ws:
@@ -270,6 +289,7 @@ def main():
     p.add_argument("--port", default=8765, type=int)
     p.add_argument("--base", default=ROOT / "vendor/tidybot_base/base.xml", type=Path, help="mobile base MJCF")
     p.add_argument("--no-base", action="store_true", help="arms on their fixed column, no mobile base")
+    p.add_argument("--codes", type=Path, help="invite-code file (see edge/access.py); without it the server is open")
     args = p.parse_args()
 
     base = None if args.no_base else args.base
@@ -283,10 +303,13 @@ def main():
     meta, blob = export_scene(adapter.model)
     print(f"3D scene: {len(meta['geoms'])} geoms, {meta['nvert']} vertices, {len(blob) / 1e6:.1f} MB")
 
-    app = web.Application(middlewares=[no_stale_ui])
+    middlewares = [no_stale_ui] if args.codes is None else [access.middleware(access.Codes(args.codes)), no_stale_ui]
+    app = web.Application(middlewares=middlewares)
     app["edge"] = edge
     app.router.add_get("/ws", ws_handler)
     app.router.add_get("/rgbd", rgbd_handler)
+    app.router.add_get("/healthz", lambda r: web.json_response(
+        {"ok": True, "clients": len(edge.clients), "driving": edge.controller is not None}))
     app.router.add_get("/scene.json", lambda r: web.json_response(meta))
     app.router.add_get("/scene.bin", lambda r: web.Response(body=blob, content_type="application/octet-stream"))
     app.router.add_get("/", lambda r: web.FileResponse(ROOT / "web/index.html"))
@@ -295,7 +318,12 @@ def main():
     async def start_loop(app):
         app["loop_task"] = asyncio.create_task(edge.run())
 
+    async def stop(app):  # free the GL contexts on the thread that made them
+        app["loop_task"].cancel()
+        await asyncio.get_running_loop().run_in_executor(edge._renderer, adapter.close_renderers)
+
     app.on_startup.append(start_loop)
+    app.on_cleanup.append(stop)
     web.run_app(app, host=args.host, port=args.port)
 
 

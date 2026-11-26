@@ -1,0 +1,5 @@
+# TLS certificate from Let's Encrypt, renewed automatically. WebSockets pass through as is.
+{SITE} {
+	encode gzip
+	reverse_proxy 127.0.0.1:8765
+}

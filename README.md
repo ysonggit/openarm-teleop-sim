@@ -40,6 +40,15 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 
 采摘任务：6 颗草莓按顺序高亮（琥珀色），左右排交替。前两颗原地就能够到，后面四颗在过道更深处（0.95–1.85 m），要开底盘过去。摘法：夹爪张开从后面伸过去，让两指在草莓两侧，合上夹爪，再往回拉。两指都压在草莓上、而且草莓在两指之间（不超出夹爪中心前方 1.2 cm）时，草莓才从梗上脱落；只用指尖勾住后沿不算，草莓留在梗上。脱落后仍在夹爪里、离开原位 5 cm 以上并保持 0.5 s 算完成，变绿；掉了要重新开始（Start task 会把草莓全部挂回去）。页面显示草莓状态（on the stem / in the gripper / dropped），页面和 `logs/` 记录每颗的用时和由哪只手摘下。
 
+## 托管演示（v0：发链接给投资人和合作伙伴）
+
+一台 EC2（Ubuntu 24.04，默认 c7g.xlarge），Caddy 负责 HTTPS 证书并反向代理到本机的 `edge.server`，systemd 守护进程。没有 GPU，相机画面用 Mesa 软件渲染（`MUJOCO_GL=osmesa`）；3D 视图在浏览器里画，不占服务器。所有人共用一个仿真：一次一个人开，其他人旁观，3 分钟没有操作自动释放控制权。
+
+- **邀请制**：每人一条专属链接 `https://<站点>/?code=…`。第一次打开后链接里的码换成 HttpOnly cookie，地址栏里不再出现。码放在服务器的 `/etc/openarm-teleop/codes.txt`，增删立即生效，不用重启：`sudo teleop-invite add "姓名, 公司"` / `list` / `revoke "姓名, 公司"`。没有有效码时页面和 WebSocket 都返回 403；`/healthz` 不需要码。
+- **日志不记 IP**：会话日志记的是邀请标签（谁）和操作，不记来访 IP。
+- **上线**（本机装好 AWS CLI）：`REGION=eu-central-1 ./deploy/ec2-launch.sh`。脚本创建密钥对、安全组（80/443 对外，22 只对你当前 IP）、弹性 IP 和实例；首次开机自动跑 `deploy/setup.sh`（约 5 分钟，含无头渲染自检 `python -m edge.selftest`）。没有自己的域名时用 `<弹性IP>.sslip.io`，有的话加 `SITE=demo.example.com` 并把 DNS A 记录指向弹性 IP。
+- **省钱**：不演示时 `aws ec2 stop-instances` 停机，弹性 IP 保留，链接不变。全部删除：`CONFIRM=yes ./deploy/ec2-teardown.sh`。
+
 ## 结构（与真实边缘设备一一对应）
 
 ![System diagram: operator browser connects over WebSocket to the edge service; on the edge, teleop → IK (arms) → safety gate → MuJoCo with the TidyBot base](docs/system-diagram.drawio.png)
@@ -54,7 +63,9 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 | `edge/task.py` | 采摘任务：顺序、成功判定（脱梗、在夹爪里、拉开 5 cm）、每颗用时 | 保留 |
 | `edge/scene.py` | 3D 视图用的模型网格（体素聚类降采样，约 2 MB）和各 link 位姿 | 真机时位姿来自 `/joint_states` 正运动学 |
 | `edge/safety.py` | 本地安全层：限位裁剪、速度限制、0.5 s 看门狗、E-stop 锁存 | 原样保留，跑在机器人本地 |
-| `edge/server.py` | 100 Hz 本地控制循环 + WebSocket；单操作员控制权；JSONL 会话日志（`logs/`） | 保留；公网暴露前必须加认证和 TLS |
+| `edge/server.py` | 100 Hz 本地控制循环 + WebSocket；单操作员控制权，空闲 3 分钟自动释放；JSONL 会话日志（`logs/`） | 保留 |
+| `edge/access.py` | 邀请码：链接换 cookie、按文件增删、命令行工具 | 换成正式账号体系前沿用 |
+| `deploy/` | EC2 上线 / 删除脚本、首次开机安装脚本、systemd 服务、Caddy 配置 | 按云环境调整 |
 | `web/` | 操作员界面：3D 视图、相机画面、手柄 / 键盘输入、任务面板、模式、RTT；`rgbd.html` 是单独的 RGB-D 窗口（彩色图 + 点云） | 保留 |
 
 协议：浏览器以 20 Hz 发送 `ee`（当前手臂、三轴速度 −1…1、夹爪 0…1；在 3D 视图里另带 `yaw`，即视角朝向），开底盘时改发 `base`（右、前、右转三个分量 −1…1，同样可带 `yaw`），边缘端以 20 Hz 回 `state`（含各 link 位姿）。浏览器切换画面时发 `view`，JPEG 只发给正在看 Robot camera 的客户端，最多约 14 fps；渲染在单独线程里做，GPU 读回慢时只会降帧率，不会卡住控制循环。RGB-D 走另一个 WebSocket `/rgbd`，只读：连上先收一条 `rgbd_hello`（分辨率、fx、fy、cx、cy、安装俯角、有效范围），之后每帧一条二进制消息：4 字节小端长度 n、n 字节 JPEG 彩色、zlib 压缩的 uint16 小端深度（毫米，按行排列）。最多 10 fps，和相机画面共用同一个渲染线程，没人看时不渲染。网格只在打开页面时从 `/scene.json`、`/scene.bin` 取一次。发送的是速度而不是位置，所以丢一包只会短暂停顿。IK 的结果仍要经过安全层，高频伺服不经过网络。底盘的三个目标和手臂关节走同一个安全层：限速 0.5 m/s、1 rad/s，断联 HOLD，E-stop 停在实测位置。
@@ -88,5 +99,6 @@ uv run python -m edge.server             # http://127.0.0.1:8765
 - 草莓采摘的真实物理：这里的梗是一个焊接约束，夹住就断；真实采摘要拧断或剪断果梗，果实会被捏伤，叶子会挡住视线和夹爪。这里的叶子没有碰撞，草莓的碰撞体是藏在果形里的小方块。
 - 真实深度相机的毛病：这里的深度没有噪声、没有边缘飞点、不怕反光和阳光，叶子后面也不会有空洞；温室里的阳光会干扰主动红外深度相机。
 - 视频走 WebSocket JPEG，只适合仿真；跨洋链路需要换成 WebRTC。
+- 托管版在真实网络上的表现：上线前只在本机验证过邀请流程、空闲释放和无头渲染自检（macOS）；EC2 上的软件渲染速度、远距离的延迟和 HOLD 次数要上线后实测。
 
 运行原理图解（中文，滑块版，尚未更新为手柄版）：[docs/运行原理.html](docs/运行原理.html)
