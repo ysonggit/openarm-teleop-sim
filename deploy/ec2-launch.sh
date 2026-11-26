@@ -28,7 +28,7 @@ AMI=$(aws --region "$REGION" ssm get-parameter --query Parameter.Value --output 
 MYIP=$(curl -fs https://checkip.amazonaws.com)
 echo "region $REGION, $TYPE ($ARCH), AMI $AMI, ssh allowed from $MYIP"
 
-if [ ! -f "$KEY" ]; then
+if ! ec2 describe-key-pairs --key-names "$NAME" >/dev/null 2>&1; then  # a local .pem from a torn-down launch is stale
   ec2 create-key-pair --key-name "$NAME" --query KeyMaterial --output text > "$KEY"
   chmod 600 "$KEY"
 fi
