@@ -14,15 +14,16 @@ import itertools
 import json
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 from aiohttp import WSMsgType, web
 
-from edge.mujoco_adapter import MARKER_ACTIVE, MARKER_DONE, MARKER_IDLE, MOUNT_Z, MujocoAdapter
+from edge.mujoco_adapter import BERRY_ACTIVE, BERRY_DONE, BERRY_IDLE, MujocoAdapter
 from edge.safety import ACTIVE, SafetyGate
 from edge.scene import body_poses, export_scene
-from edge.task import RADIUS, TARGETS, ReachTask
+from edge.task import HarvestTask
 from edge.teleop import BASE_SPEED, BASE_TURN, MAX_SPEED, TCP, CartesianTeleop
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,6 +47,9 @@ class Edge:
         self.adapter, self.gate, self.log = adapter, gate, log
         self.teleop, self.task = teleop, task
         self.clients = {}  # ws -> client id
+        self.watching = set()  # clients showing the robot camera; only they get JPEG frames
+        self._renderer = ThreadPoolExecutor(1, thread_name_prefix="render")
+        self._frame = None  # pending render
         self.controller = None
         self._ids = itertools.count(1)
 
@@ -65,7 +69,7 @@ class Edge:
             "base": None if a.base_qadr is None else
                     {"body": a.model.body("base_link").id, "speed": BASE_SPEED, "turn": BASE_TURN},
             "camera": a.camera_params(),
-            "markers": {"ids": a.marker_ids, "idle": MARKER_IDLE, "active": MARKER_ACTIVE, "done": MARKER_DONE},
+            "berries": {"ids": a.berry_ids, "idle": BERRY_IDLE, "active": BERRY_ACTIVE, "done": BERRY_DONE},
         }
 
     def state(self):
@@ -94,25 +98,35 @@ class Edge:
                 self.log.write("mode", mode=mode, reason=reason)
             self.gate.events.clear()
 
-            result = self.task.tick(self.adapter.body_positions(TCP.values()), time.monotonic())
+            for i, side in self.adapter.detach_grasped():
+                self.log.write("picked", berry=i, arm=side)
+            a = self.adapter
+            result = self.task.tick(a.berry_positions(), a.berry_attached(), a.body_positions(TCP.values()),
+                                    time.monotonic())
             if result:
                 self.log.write("task", event=result, index=self.task.index, seconds=self.task.results[-1])
-                self.adapter.set_marker_colors(self.task.index if self.task.active else None, self.task.index)
+                a.set_berry_colors(self.task.index if self.task.active else None, self.task.index)
 
             if tick % STATE_EVERY == 0:
                 await self._broadcast(json.dumps(self.state()))
-            if tick % VIDEO_EVERY == 0 and self.clients:
-                await self._broadcast(self.adapter.render_jpeg())
+            if tick % VIDEO_EVERY == 0 and self.watching and (self._frame is None or self._frame.done()):
+                self._frame = asyncio.create_task(self._send_frame(self.adapter.data.qpos.copy()))
 
             next_t += LOOP_DT
             await asyncio.sleep(max(0.0, next_t - time.monotonic()))
 
-    async def _broadcast(self, payload):
-        for ws in list(self.clients):
+    async def _send_frame(self, qpos):
+        """Render off the control loop; a slow frame only lowers the frame rate."""
+        jpeg = await asyncio.get_running_loop().run_in_executor(self._renderer, self.adapter.render_jpeg, qpos)
+        await self._broadcast(jpeg, self.watching)
+
+    async def _broadcast(self, payload, targets=None):
+        for ws in list(self.clients if targets is None else targets):
             try:
                 await (ws.send_bytes if isinstance(payload, bytes) else ws.send_str)(payload)
             except ConnectionError:
                 self.clients.pop(ws, None)
+                self.watching.discard(ws)
 
     async def handle(self, ws, msg):
         kind, cid, now = msg.get("type"), self.clients[ws], time.monotonic()
@@ -120,6 +134,8 @@ class Edge:
 
         if kind == "ping":
             await ws.send_json({"type": "pong", "t": msg.get("t")})
+        elif kind == "view":  # which view the client shows: JPEG frames only for the robot camera
+            (self.watching.add if msg.get("video") else self.watching.discard)(ws)
         elif kind == "claim":
             granted = self.controller in (None, ws)
             if granted:
@@ -154,8 +170,9 @@ class Edge:
                 self.gate.command(goal, now)
                 self.teleop.reset(goal, now)
         elif kind == "task_start":
+            self.adapter.reset_berries()
             self.task.start(now)
-            self.adapter.set_marker_colors(0, 0)
+            self.adapter.set_berry_colors(0, 0)
             self.log.write("task", event="start", client=cid)
         elif kind == "release":
             self._release("controller released")
@@ -174,6 +191,7 @@ class Edge:
 
     def disconnect(self, ws):
         cid = self.clients.pop(ws, None)
+        self.watching.discard(ws)
         self.log.write("disconnect", client=cid)
         if ws is self.controller:
             self._release("controller disconnected")
@@ -209,11 +227,6 @@ def finite_or_none(xs):
     return [float(x) if math.isfinite(x) else None for x in xs]
 
 
-def mounted(targets, base):
-    """Task targets sit around the arms, so they rise with the base's mount height."""
-    return np.asarray(targets) + [0, 0, MOUNT_Z if base else 0]
-
-
 def main():
     p = argparse.ArgumentParser()
     # Cartesian teleop uses Enactic OpenArm v1 bimanual names (see edge/teleop.py).
@@ -225,11 +238,11 @@ def main():
     args = p.parse_args()
 
     base = None if args.no_base else args.base
-    adapter = MujocoAdapter(args.model, base_path=base, markers=mounted(TARGETS, base), marker_radius=RADIUS)
+    adapter = MujocoAdapter(args.model, base_path=base, greenhouse_rows=True)
     teleop = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper,
                              adapter.camera_frame())
     gate = SafetyGate(adapter.lower, adapter.upper, adapter.vmax)
-    edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, ReachTask(mounted(TARGETS, base)))
+    edge = Edge(adapter, gate, SessionLog(ROOT / "logs"), teleop, HarvestTask(adapter.berry_start))
     print(f"session log: {edge.log.path}")
 
     meta, blob = export_scene(adapter.model)

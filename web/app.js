@@ -18,12 +18,12 @@ let prevPressed = [];
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.binaryType = "blob";
-  ws.onopen = () => setLink("connected", "active");
+  ws.onopen = () => { setLink("connected", "active"); send({ type: "view", video: view === "cam" }); };
   ws.onclose = () => { setLink("disconnected", "estop"); controlling = false; updateButtons(); setTimeout(connect, 1000); };
   ws.onmessage = (ev) => (typeof ev.data === "string" ? onJson(JSON.parse(ev.data)) : onFrame(ev.data));
 }
 
-function send(msg) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
+function send(msg) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
 function setLink(text, cls) { $("link").textContent = text; $("link").className = `pill ${cls}`; }
 
 function onFrame(blob) {
@@ -34,7 +34,7 @@ function onFrame(blob) {
 }
 
 function onJson(m) {
-  if (m.type === "hello") { hello = m; buildJoints(); init3D(); }
+  if (m.type === "hello") { hello = m; buildJoints(); init3D(); $("t-far").hidden = !hello.base; }
   else if (m.type === "state") onState(m);
   else if (m.type === "pong") $("rtt").textContent = `RTT ${(performance.now() - m.t).toFixed(1)} ms`;
   else if (m.type === "control") { controlling = m.granted; if (!m.granted) alert("Another operator has control."); updateButtons(); }
@@ -52,7 +52,7 @@ function onState(m) {
   if (m.base) $("base").textContent = `x ${m.base[0].toFixed(2)}  y ${m.base[1].toFixed(2)}  yaw ${(m.base[2] * 180 / Math.PI).toFixed(0)}°`;
   if (view3d) {
     view3d.setBodies(m.bodies);
-    view3d.setMarkers(m.task.active ? m.task.index : -1, m.task.results.length);
+    view3d.setBerries(m.task.active ? m.task.index : -1, m.task.results.length);
   }
   updateButtons();
 }
@@ -78,6 +78,7 @@ function setView(v) {
   $("video").hidden = v !== "cam";
   $("view3d").hidden = v !== "3d";
   $("presets").hidden = v !== "3d";
+  send({ type: "view", video: v === "cam" }); // the edge renders camera frames only for viewers
   if (!$("viewhint").textContent.startsWith("3D view failed")) {
     $("viewhint").textContent = v === "3d"
       ? "Drag to orbit, scroll to zoom, right-drag to pan. Stick directions follow this view."
@@ -90,6 +91,7 @@ function showTask(t) {
   $("t-index").textContent = t.active ? `${t.index + 1} / ${t.total}` : done ? `done, ${sum(t.results).toFixed(1)} s total` : "—";
   $("t-elapsed").textContent = t.active ? `${t.elapsed.toFixed(1)} s` : "—";
   $("t-dist").textContent = t.active && t.dist != null ? `${(t.dist * 100).toFixed(1)} cm` : "—";
+  $("t-status").textContent = t.active && t.status ? t.status : "—";
   $("t-results").innerHTML = t.results.map((s, i) => `<span>${i + 1}: ${s.toFixed(1)} s</span>`).join("");
 }
 

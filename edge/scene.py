@@ -8,11 +8,12 @@ sent once, decimated by vertex clustering; poses go out with every state.
 import mujoco
 import numpy as np
 
-VISIBLE_GROUPS = (0, 2)  # 0: floor, markers; 2: OpenArm visual meshes (3 is collision)
+VISIBLE_GROUPS = (0, 2)  # 0: floor, greenhouse, berries; 2: OpenArm visual meshes (3 is collision)
 CELL = 0.003  # m; vertex-clustering grid. ~2 MB for the bimanual model.
 TYPES = {
     int(mujoco.mjtGeom.mjGEOM_PLANE): "plane",
     int(mujoco.mjtGeom.mjGEOM_SPHERE): "sphere",
+    int(mujoco.mjtGeom.mjGEOM_ELLIPSOID): "ellipsoid",
     int(mujoco.mjtGeom.mjGEOM_CAPSULE): "capsule",
     int(mujoco.mjtGeom.mjGEOM_CYLINDER): "cylinder",
     int(mujoco.mjtGeom.mjGEOM_BOX): "box",

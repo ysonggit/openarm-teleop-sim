@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import mujoco
 import numpy as np
 import pytest
 
@@ -41,16 +42,146 @@ def test_arms_stand_on_the_base(adapter):
     assert 0.8 < shoulder[2] < 0.9  # column sunk into the base
 
 
-def test_mounted_targets_are_reachable(adapter):
-    """The reach targets rise with the mount, so each one is still within 2 mm of IK reach."""
-    from edge.server import mounted
-    from edge.task import TARGETS
+@pytest.fixture(scope="module")
+def world():
+    """The robot on its base in the greenhouse aisle."""
+    from edge.mujoco_adapter import MujocoAdapter
+
+    return MujocoAdapter(MODEL, base_path=BASE, greenhouse_rows=True)
+
+
+def make_teleop(a):
     from edge.teleop import CartesianTeleop
 
-    t = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper, FRAME)
-    for p in mounted(TARGETS, BASE):
-        errs = [arm.ik.solve(adapter.home[arm.idx], p)[1] for arm in t.arms.values()]
-        assert min(errs) < 2e-3, p
+    t = CartesianTeleop(a.model, a.names, a.home, a.lower, a.upper, FRAME)
+    t.reset(a.home, now=0.0)
+    return t
+
+
+def side_of(p):
+    return "left" if p[1] > 0 else "right"
+
+
+def test_near_berries_are_in_reach_and_later_ones_need_the_base(world):
+    """Near berries are well within teleop's reach slack for the arm on their side. Those further
+    down the aisle are out of reach from the start, and in reach once the base drives up to them."""
+    from edge.greenhouse import FIXED_REACH_X
+    from edge.teleop import REACH_SLACK
+
+    t = make_teleop(world)
+    err = lambda p: t.arms[side_of(p)].ik.solve(world.home[t.arms[side_of(p)].idx], p)[1]
+    near = [p for p in world.berry_start if p[0] <= FIXED_REACH_X]
+    far = [p for p in world.berry_start if p[0] > FIXED_REACH_X]
+    assert len(near) == 2 and len(far) >= 3
+    for p in near:
+        assert err(p) < REACH_SLACK / 2, p
+    for p in far:
+        assert err(p) > 0.1, p
+        assert err(p - [p[0] - 0.40, 0, 0]) < REACH_SLACK / 2, p  # base driven to x = p.x - 0.40
+
+
+def move_to(world, t, goal, side, point, grip, seconds):
+    """Steer one gripper target straight at `point` (base frame), stepping the sim."""
+    for _ in range(int(seconds / 0.05)):
+        v = FRAME.T @ np.clip((np.asarray(point) - t.targets[side]) / (0.15 * 0.05), -1, 1)
+        goal = t.step(goal, side, v, grip, now=t.last_t + 0.05, yaw=None)
+        world.write(goal)
+        world.step(0.05)
+        world.detach_grasped()
+    return goal
+
+
+def pick(world, t, goal, p):
+    """Come in from behind with the gripper open, close on the berry, pull it back into the aisle."""
+    side = side_of(p)
+    goal = move_to(world, t, goal, side, p - [0.09, 0, 0], 0, 2.5)
+    goal = move_to(world, t, goal, side, p, 0, 2.0)
+    goal = move_to(world, t, goal, side, p, 1, 1.0)
+    return move_to(world, t, goal, side, p + [-0.08, -np.sign(p[1]) * 0.06, 0], 1, 1.5)
+
+
+def test_berry_hangs_until_squeezed_then_comes_off_and_counts(world):
+    from edge.task import HarvestTask
+    from edge.teleop import TCP
+
+    world.reset_berries()
+    world.step(0.5)
+    np.testing.assert_allclose(world.berry_positions()[1], world.berry_start[1], atol=1e-3)  # hangs still
+    t, goal = make_teleop(world), world.home.copy()
+    task = HarvestTask(world.berry_start)
+    task.start(now=0.0)
+    task.index = 1  # the right-row berry
+    p = world.berry_start[1]
+    goal = pick(world, t, goal, p)
+    assert world.berry_attached() == [True, False, True, True, True, True]
+    args = world.berry_positions(), world.berry_attached(), world.body_positions(TCP.values())
+    assert task.tick(*args, now=10.0) is None
+    assert task.status == "in the gripper"
+    assert task.tick(*args, now=11.0) == "hit"
+    world.reset_berries()
+    assert all(world.berry_attached())
+    np.testing.assert_allclose(world.berry_positions()[1], p)
+    world.write(world.home)
+    world.step(1.0)
+
+
+@pytest.mark.parametrize("offset, outcome", [
+    ((0.015, 0.01, -0.015), "held"),  # a bit off-center: still a good grasp
+    ((-0.02, 0, 0), "on the stem"),  # too shallow: the fingertips only catch its back
+])
+def test_off_center_grasps_hold_and_shallow_ones_leave_the_berry_on(world, offset, outcome):
+    from edge.teleop import TCP
+
+    world.reset_berries()
+    t, goal = make_teleop(world), world.home.copy()
+    goal = pick(world, t, goal, world.berry_start[0] + offset)
+    tcp = world.body_positions([TCP["left"]])[0]
+    if outcome == "held":
+        assert not world.berry_attached()[0]
+        assert np.linalg.norm(world.berry_positions()[0] - tcp) < 0.05
+    else:
+        assert world.berry_attached()[0]
+    world.reset_berries()
+    world.write(world.home)
+    world.step(1.5)
+
+
+def test_a_berry_down_the_aisle_can_be_picked_after_driving(world):
+    world.reset_berries()
+    t, goal = make_teleop(world), world.home.copy()
+    p = world.berry_start[4]  # left row, 1.6 m down the aisle
+    for x in np.linspace(0, p[0] - 0.40, 50):
+        goal[0] = x
+        world.write(goal)
+        world.step(0.05)
+    world.step(1.0)
+    np.testing.assert_allclose(world.base_pose(), [p[0] - 0.40, 0, 0], atol=0.01)
+    goal = pick(world, t, goal, p - [p[0] - 0.40, 0, 0])  # in the base frame
+    assert not world.berry_attached()[4]
+    assert np.linalg.norm(world.berry_positions()[4] - p) > 0.05
+    world.reset_berries()
+    world.write(world.home)
+    world.step(4.0)
+
+
+def test_driving_down_the_aisle_touches_nothing(world):
+    """With the arms at home the base drives the whole aisle without touching gutters, legs or berries."""
+    m, d = world.model, world.data
+    world.reset_berries()
+    robot = {b for b in range(1, m.nbody) if not m.body(b).name.startswith("berry")}
+    goal = world.home.copy()
+    for x in list(np.linspace(0, 1.5, 60)) + list(np.linspace(1.5, -1.0, 100)):
+        goal[0] = x
+        world.write(goal)
+        world.step(0.05)
+        hits = [c for c in d.contact[:d.ncon]
+                if (m.geom_bodyid[c.geom1] in robot) != (m.geom_bodyid[c.geom2] in robot)
+                and m.geom_type[c.geom1] != mujoco.mjtGeom.mjGEOM_PLANE and m.geom_type[c.geom2] != mujoco.mjtGeom.mjGEOM_PLANE]
+        assert not hits, x
+    assert all(world.berry_attached())
+    goal[0] = 0
+    world.write(goal)
+    world.step(3.0)
 
 
 def test_forward_stick_drives_the_base_in_the_view_frame(teleop):
@@ -123,13 +254,13 @@ def test_hello_and_state_are_strict_json(adapter, tmp_path):
 
     from edge.safety import SafetyGate
     from edge.server import Edge, SessionLog
-    from edge.task import ReachTask
+    from edge.task import HarvestTask
     from edge.teleop import CartesianTeleop
 
     teleop = CartesianTeleop(adapter.model, adapter.names, adapter.home, adapter.lower, adapter.upper, FRAME)
     gate = SafetyGate(adapter.lower, adapter.upper, adapter.vmax)
     gate.tick(adapter.read()[0], now=0.0, dt=0.01)
-    edge = Edge(adapter, gate, SessionLog(tmp_path), teleop, ReachTask())
+    edge = Edge(adapter, gate, SessionLog(tmp_path), teleop, HarvestTask(adapter.berry_start))
     json.dumps(edge.hello(1), allow_nan=False)
     json.dumps(edge.state(), allow_nan=False)
 

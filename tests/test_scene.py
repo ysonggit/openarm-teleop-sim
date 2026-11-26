@@ -17,15 +17,16 @@ def test_decimate_merges_close_vertices_and_drops_collapsed_faces():
 
 
 @needs_model
-def test_scene_has_visual_meshes_markers_and_fits_in_a_few_mb():
+def test_scene_has_visual_meshes_berries_and_fits_in_a_few_mb():
     from edge.mujoco_adapter import MujocoAdapter
-    from edge.task import TARGETS
 
-    a = MujocoAdapter(MODEL, markers=TARGETS)
+    a = MujocoAdapter(MODEL, greenhouse_rows=True)
+    assert len(a.berry_ids) == 2  # a fixed robot only gets the berries it can reach
     meta, blob = export_scene(a.model)
     names = [g["name"] for g in meta["geoms"]]
     assert sum(n.endswith("_visual_0") for n in names) > 10
     assert not any("collision" in n for n in names)
-    assert all(f"marker{i}" in names for i in range(len(TARGETS)))
+    assert all(f"berry{i}" in names for i in range(len(a.berry_ids)))
+    assert "ellipsoid" in {g["type"] for g in meta["geoms"]}
     assert len(blob) == meta["nvert"] * 12 + meta["nface"] * 12 < 4e6
     assert len(body_poses(a.data)) == 7 * a.model.nbody

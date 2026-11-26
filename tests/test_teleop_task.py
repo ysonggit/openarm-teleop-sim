@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from edge.task import DWELL, RADIUS, ReachTask
+from edge.task import DWELL, PULL, HarvestTask
 
 MODEL = Path(__file__).resolve().parent.parent / "vendor/openarm_mujoco/v1/openarm_bimanual.xml"
 needs_model = pytest.mark.skipif(not MODEL.exists(), reason="run scripts/fetch_model.sh first")
@@ -63,24 +63,35 @@ def test_grip_maps_to_gripper_range_and_other_arm_is_untouched(teleop):
     np.testing.assert_array_equal(new[t.arms["right"].idx], goal[t.arms["right"].idx])
 
 
-def test_task_counts_a_hit_only_after_dwell():
-    task = ReachTask(targets=[(0, 0, 0), (1, 0, 0)])
+START = [np.array([0, 0, 0.7])]
+TCPS = [np.zeros(3), np.array([5.0, 5, 5])]
+
+
+def test_task_counts_a_berry_once_off_the_stem_held_and_pulled_away_for_the_dwell():
+    task = HarvestTask(starts=START + [np.array([1, 0, 0.7])])
     task.start(now=0.0)
-    on_target = [np.array([RADIUS / 2, 0, 0]), np.array([9, 9, 9])]
-    assert task.tick(on_target, now=1.0) is None
-    assert task.tick(on_target, now=1.0 + DWELL / 2) is None
-    assert task.tick(on_target, now=1.0 + DWELL) == "hit"
+    pulled = [np.array([-PULL - 0.01, 0, 0.7]), np.array([1, 0, 0.7])]
+    tcps = [pulled[0], TCPS[1]]
+    assert task.tick(pulled, [True, True], tcps, now=0.5) is None  # still on the stem
+    assert task.status == "on the stem"
+    assert task.tick([START[0], pulled[1]], [False, True], [START[0], TCPS[1]], now=0.6) is None  # not pulled yet
+    assert task.tick(pulled, [False, True], tcps, now=1.0) is None
+    assert task.status == "in the gripper"
+    assert task.tick(pulled, [False, True], tcps, now=1.0 + DWELL) == "hit"
     assert task.index == 1 and task.results == [pytest.approx(1.0 + DWELL)]
+    assert task.summary(2.0)["status"] is None  # until the next tick looks at the next berry
 
 
-def test_task_leaving_target_resets_dwell_and_finishes():
-    task = ReachTask(targets=[(0, 0, 0)])
+def test_task_dropping_the_berry_resets_dwell_and_finishes():
+    task = HarvestTask(starts=START)
     task.start(now=0.0)
-    near, far = [np.zeros(3)], [np.array([1.0, 0, 0])]
-    task.tick(near, now=0.0)
-    task.tick(far, now=0.3)
-    assert task.tick(near, now=0.4) is None
-    assert task.tick(near, now=0.4 + DWELL) == "done"
+    held = [np.array([-0.1, 0, 0.7])]
+    dropped = [np.array([-0.1, 0, 0.02])]
+    task.tick(held, [False], held, now=0.0)
+    task.tick(dropped, [False], held, now=0.3)
+    assert task.status == "dropped"
+    assert task.tick(held, [False], held, now=0.4) is None
+    assert task.tick(held, [False], held, now=0.4 + DWELL) == "done"
     assert not task.active
 
 

@@ -106,7 +106,7 @@ export async function createView3D(container, hello) {
     renderer.render(scene, camera);
   });
 
-  const colors = hello.markers;
+  const colors = hello.berries;
   return {
     setPreset,
     setBodies(flat) {
@@ -123,7 +123,7 @@ export async function createView3D(container, hello) {
       controls.target.add(d);
       base = next;
     },
-    setMarkers(active, done) {
+    setBerries(active, done) {
       colors.ids.forEach((id, i) => {
         const rgba = i === active ? colors.active : i < done ? colors.done : colors.idle;
         const m = byId.get(id)?.material;
@@ -143,6 +143,7 @@ function makeGeometry(gm, meshGeom) {
   switch (gm.type) {
     case "mesh": return meshGeom[gm.mesh];
     case "sphere": return new THREE.SphereGeometry(s[0], 24, 16);
+    case "ellipsoid": return new THREE.SphereGeometry(1, 24, 16).scale(s[0], s[1], s[2]);
     case "box": return new THREE.BoxGeometry(2 * s[0], 2 * s[1], 2 * s[2]);
     case "cylinder": return new THREE.CylinderGeometry(s[0], s[0], 2 * s[1], 24).rotateX(Math.PI / 2);
     case "capsule": return new THREE.CapsuleGeometry(s[0], 2 * s[1], 8, 16).rotateX(Math.PI / 2);
