@@ -47,7 +47,7 @@ def world():
     """The robot on its base in the greenhouse aisle."""
     from edge.mujoco_adapter import MujocoAdapter
 
-    return MujocoAdapter(MODEL, base_path=BASE, greenhouse_rows=True)
+    return MujocoAdapter(MODEL, base_path=BASE, scene="strawberry")
 
 
 def make_teleop(a):

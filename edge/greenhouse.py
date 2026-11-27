@@ -33,12 +33,13 @@ STEEL = [0.45, 0.46, 0.48, 1]
 LEAF = [0.2, 0.45, 0.18, 1]
 STEM = [0.35, 0.55, 0.25, 1]
 BERRY = [0.62, 0.08, 0.1, 1]
+TARGET_RGBA = BERRY
 
 BOX, CAPSULE, CYLINDER, ELLIPSOID = (mujoco.mjtGeom.mjGEOM_BOX, mujoco.mjtGeom.mjGEOM_CAPSULE,
                                      mujoco.mjtGeom.mjGEOM_CYLINDER, mujoco.mjtGeom.mjGEOM_ELLIPSOID)
 
 
-def berry_starts(mount_z, mobile):
+def target_starts(mount_z, mobile):
     """World positions where the berries hang."""
     z = GUTTER_BOTTOM + mount_z - HANG
     return [(x, s * BERRY_Y, z) for x, s in BERRIES if mobile or x <= FIXED_REACH_X]
@@ -67,7 +68,7 @@ def build(spec, mount_z, mobile):
                            quat=[np.cos(a / 2), 0, 0, np.sin(a / 2)], rgba=LEAF, **visual)
 
     names = []
-    for i, (x, y, z) in enumerate(berry_starts(mount_z, mobile)):
+    for i, (x, y, z) in enumerate(target_starts(mount_z, mobile)):
         s = np.sign(y)
         w.add_geom(type=CAPSULE, size=[0.0025, 0, 0], fromto=[x, s * (GUTTER_IN + 0.01), top, x, y, z + BERRY_HALF[2]],
                    rgba=STEM, **visual)

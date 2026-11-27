@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     t = time.perf_counter()
     a = MujocoAdapter(ROOT / "vendor/openarm_mujoco/v1/openarm_bimanual.xml",
-                      base_path=ROOT / "vendor/tidybot_base/base.xml", greenhouse_rows=True)
+                      base_path=ROOT / "vendor/tidybot_base/base.xml", scene="strawberry")
     a.write(a.home)
     t_step = time.perf_counter()
     a.step(1.0)

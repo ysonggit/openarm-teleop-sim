@@ -34,17 +34,20 @@ function onFrame(blob) {
 }
 
 function onJson(m) {
-  if (m.type === "hello") { hello = m; buildJoints(); init3D(); $("t-far").hidden = !hello.base; }
+  if (m.type === "hello") { hello = m; buildJoints(); buildScenes(); init3D(); $("t-far").hidden = !hello.base; }
+  else if (m.type === "reload") location.reload(); // the robot moved to another scene
   else if (m.type === "state") onState(m);
   else if (m.type === "pong") $("rtt").textContent = `RTT ${(performance.now() - m.t).toFixed(1)} ms`;
   else if (m.type === "control") {
     controlling = m.granted;
-    if (!m.granted) alert(m.reason === "idle"
+    if (m.reason === "solved" || m.reason === "skipped") $("reason").textContent = m.reason === "solved"
+      ? "Solved, thanks. The robot carries on." : "Skipped. The robot carries on with the next one.";
+    else if (!m.granted) alert(m.reason === "idle"
       ? `Control was released after ${Math.round(hello.idle_release_s / 60)} min without input. Claim it again to continue.`
       : `Someone else is driving right now. You can watch; control frees up when they release it or after ${Math.round(hello.idle_release_s / 60)} min idle.`);
     updateButtons();
   }
-  else if (m.type === "error") console.warn("edge error", m);
+  else if (m.type === "error") { console.warn("edge error", m); if (m.error === "someone is driving") alert("Someone is driving right now."); }
 }
 
 function onState(m) {
@@ -55,6 +58,7 @@ function onState(m) {
   $("reason").textContent = m.reason;
   m.q.forEach((q, i) => { $(`meas${i}`).textContent = `${fmt(q)} → ${fmt(m.target[i])}`; });
   showTask(m.task);
+  showAuto(m);
   if (m.base) $("base").textContent = `x ${m.base[0].toFixed(2)}  y ${m.base[1].toFixed(2)}  yaw ${(m.base[2] * 180 / Math.PI).toFixed(0)}°`;
   if (view3d) {
     view3d.setBodies(m.bodies);
@@ -92,13 +96,49 @@ function setView(v) {
   }
 }
 
+const HINTS = {
+  strawberry: "Pick the amber strawberry: come in from behind with the fingers either side, close the gripper, then pull it away. Left row: left arm, right row: right arm.",
+  weeding: "Pull the amber weed: come down over it from above, close the gripper around the stem, then lift it out. Left bed: left arm, right bed: right arm.",
+};
+const SCENE_NAMES = { strawberry: "Tabletop strawberries", weeding: "Soil-bed tunnel: weeding" };
+
+function buildScenes() {
+  $("t-hint").textContent = HINTS[hello.scene] ?? "";
+  $("scenes").innerHTML = hello.scenes.length < 2 ? "" : hello.scenes.map((s) =>
+    `<button data-scene="${s}" class="${s === hello.scene ? "on" : ""}">${SCENE_NAMES[s] ?? s}</button>`).join("");
+  document.querySelectorAll("[data-scene]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.scene !== hello.scene) send({ type: "scene", name: b.dataset.scene });
+  }));
+  $("auto").hidden = $("auto-stop").hidden = !hello.autonomy;
+}
+
+const PHASES = { home: "homing the arms", drive: "driving to the target", pre: "lining up", reach: "reaching in",
+  close: "closing the gripper", pull: "pulling", waiting: "waiting for help" };
+
+function showAuto(m) {
+  const a = m.auto, t = m.task;
+  $("a-phase").textContent = !a?.running ? "idle"
+    : m.actor === "human" ? `an operator is driving (target ${t.index + 1})`
+    : `${PHASES[a.phase] ?? a.phase} (target ${t.index + 1} / ${t.total})`;
+  $("rec").textContent = m.rec ? `● ${m.rec.t.toFixed(1)} s, ${m.actor}` : "—";
+  const ticket = a?.running ? a.ticket : null;
+  $("ticket").hidden = !ticket;
+  if (ticket) {
+    $("ticket-text").textContent = `Target ${ticket.index + 1}: ${ticket.text}`;
+    $("accept").hidden = controlling;
+    $("accept").disabled = m.controller != null;
+    $("skip").hidden = !controlling;
+  }
+}
+
 function showTask(t) {
   const done = !t.active && t.results.length === t.total;
-  $("t-index").textContent = t.active ? `${t.index + 1} / ${t.total}` : done ? `done, ${sum(t.results).toFixed(1)} s total` : "—";
+  const took = t.results.filter((s) => s != null);
+  $("t-index").textContent = t.active ? `${t.index + 1} / ${t.total}` : done ? `done, ${sum(took).toFixed(1)} s total` : "—";
   $("t-elapsed").textContent = t.active ? `${t.elapsed.toFixed(1)} s` : "—";
   $("t-dist").textContent = t.active && t.dist != null ? `${(t.dist * 100).toFixed(1)} cm` : "—";
   $("t-status").textContent = t.active && t.status ? t.status : "—";
-  $("t-results").innerHTML = t.results.map((s, i) => `<span>${i + 1}: ${s.toFixed(1)} s</span>`).join("");
+  $("t-results").innerHTML = t.results.map((s, i) => `<span>${i + 1}: ${s == null ? "skipped" : `${s.toFixed(1)} s`}</span>`).join("");
 }
 
 function buildJoints() {
@@ -111,7 +151,10 @@ function updateButtons() {
   $("claim").textContent = controlling ? "Release control" : "Claim control";
   $("activate").disabled = !controlling || active;
   $("home").disabled = !controlling || !active;
-  $("task").disabled = !controlling;
+  const running = !!state?.auto?.running;
+  $("task").disabled = !controlling || running;
+  $("auto").disabled = running || state?.controller != null;
+  $("auto-stop").disabled = !running;
 }
 
 function setMode(m) { if (hello?.base || m === "arm") mode = m; }
@@ -171,6 +214,10 @@ $("activate").onclick = () => send({ type: "activate" });
 $("home").onclick = () => send({ type: "home" });
 $("estop").onclick = () => send({ type: "estop" });
 $("task").onclick = () => send({ type: "task_start" });
+$("auto").onclick = () => send({ type: "auto_start" });
+$("auto-stop").onclick = () => send({ type: "auto_stop" });
+$("accept").onclick = () => send({ type: "accept" });
+$("skip").onclick = () => send({ type: "skip" });
 $("rgbd-open").onclick = () => window.open("rgbd.html", "rgbd", "popup,width=840,height=480");
 document.querySelectorAll("[data-arm]").forEach((b) => (b.onclick = () => { arm = b.dataset.arm; setMode("arm"); b.blur(); }));
 document.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { setMode(b.dataset.mode); b.blur(); }));

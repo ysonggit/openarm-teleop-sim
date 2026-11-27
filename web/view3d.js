@@ -8,10 +8,12 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const deg = Math.PI / 180;
 
-export async function createView3D(container, hello) {
+// sceneName: another scene's geometry (episode replay); default: the one the robot is in now.
+export async function createView3D(container, hello, sceneName) {
+  const q = sceneName ? `?scene=${encodeURIComponent(sceneName)}` : "";
   const [meta, blob] = await Promise.all([
-    fetch("scene.json").then((r) => r.json()),
-    fetch("scene.bin").then((r) => r.arrayBuffer()),
+    fetch(`scene.json${q}`).then((r) => r.json()),
+    fetch(`scene.bin${q}`).then((r) => r.arrayBuffer()),
   ]);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });

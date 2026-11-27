@@ -19,7 +19,7 @@ class HarvestTask:
         self.starts = np.asarray(starts, float)  # where the berries hang
         self.active = False
         self.index = 0
-        self.results = []  # seconds per picked berry
+        self.results = []  # seconds per picked berry; None for one skipped
         self.trial_start = None
         self.inside_since = None
         self.dist = self.status = None
@@ -46,7 +46,14 @@ class HarvestTask:
             self.inside_since = now
         if now - self.inside_since < DWELL:
             return None
-        self.results.append(now - self.trial_start)
+        return self._advance(now - self.trial_start, now)
+
+    def skip(self, now):
+        """Give up on the current target (an operator decided it can't be done): no time counts."""
+        return self._advance(None, now) if self.active else None
+
+    def _advance(self, seconds, now):
+        self.results.append(seconds)
         self.index += 1
         self.trial_start, self.inside_since = now, None
         self.dist = self.status = None
@@ -63,5 +70,5 @@ class HarvestTask:
             "elapsed": round(now - self.trial_start, 2) if self.active else None,
             "dist": None if self.dist is None else round(self.dist, 3),
             "status": self.status,
-            "results": [round(r, 2) for r in self.results],
+            "results": [None if r is None else round(r, 2) for r in self.results],  # None: skipped
         }

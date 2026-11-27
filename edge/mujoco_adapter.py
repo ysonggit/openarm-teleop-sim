@@ -11,7 +11,7 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from edge import greenhouse, rgbd
+from edge import greenhouse, rgbd, tunnel
 
 ARM_VMAX = 1.0  # rad/s, conservative for teleop
 GRIPPER_VMAX = 0.05  # m/s
@@ -30,10 +30,11 @@ COLUMN_SINK = 0.18  # m; the OpenArm column's foot sits inside the base, so the 
 # Arms hanging straight down reach 0.63 m below the shoulder, so below ~1.0 m they would touch
 # the base top; teleop keeps the grippers out of that zone instead (see edge/teleop.py).
 MOUNT_Z = BASE_TOP - COLUMN_SINK  # m; height of the OpenArm origin (column foot) above the floor
+SCENES = {"strawberry": greenhouse, "weeding": tunnel}  # scene name -> module with build() and target_starts()
 
 
 class MujocoAdapter:
-    def __init__(self, model_path, keyframe="home", width=480, height=360, base_path=None, greenhouse_rows=False):
+    def __init__(self, model_path, keyframe="home", width=480, height=360, base_path=None, scene=None):
         spec = mujoco.MjSpec.from_file(str(model_path))
         for body in spec.bodies:  # the arm's own controller holds it up, as on the real robot;
             body.gravcomp = 1  # without this the grippers sag ~2.5 cm below their targets
@@ -46,7 +47,9 @@ class MujocoAdapter:
         spec.worldbody.add_light(pos=[0, 0, 2], dir=[0, 0, -1])
         spec.visual.headlight.ambient = [0.35] * 3  # greenhouse daylight for the rendered cameras
         spec.visual.headlight.diffuse = [0.55] * 3
-        berries = greenhouse.build(spec, self.mount_z, base_path is not None) if greenhouse_rows else []
+        self.scene = scene
+        berries = SCENES[scene].build(spec, self.mount_z, base_path is not None) if scene else []
+        self.target_rgba = SCENES[scene].TARGET_RGBA if scene else BERRY_IDLE  # a weed is not red
         rgbd.add_camera(spec)
         with warnings.catch_warnings():  # attach() with an empty prefix keeps the arm's names
             warnings.simplefilter("ignore")
@@ -188,7 +191,7 @@ class MujocoAdapter:
 
     def set_berry_colors(self, active, done):
         for i, gid in enumerate(self.berry_ids):
-            self.model.geom_rgba[gid] = BERRY_ACTIVE if i == active else BERRY_DONE if i < done else BERRY_IDLE
+            self.model.geom_rgba[gid] = BERRY_ACTIVE if i == active else BERRY_DONE if i < done else self.target_rgba
 
     def close_renderers(self):
         """Free the GL contexts; call it on the thread that rendered (freeing them elsewhere crashes)."""

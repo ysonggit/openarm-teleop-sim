@@ -28,7 +28,7 @@ def test_frame_round_trips_depth_in_mm_and_drops_out_of_range():
 def world():
     from edge.mujoco_adapter import MujocoAdapter
 
-    a = MujocoAdapter(MODEL, base_path=BASE, greenhouse_rows=True)
+    a = MujocoAdapter(MODEL, base_path=BASE, scene="strawberry")
     a.write(a.home)
     a.step(0.5)
     return a

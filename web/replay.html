@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episode Replay</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="replay.css">
+</head>
+<body>
+  <header>
+    <strong>Episodes · Replay</strong>
+    <span class="pill">recorded attempts, robot and operator</span>
+    <button id="refresh">Refresh</button>
+    <a href="./" style="margin-left:auto">← Operator view</a>
+  </header>
+  <main class="replay">
+    <section class="list">
+      <div class="filters">
+        <select id="f-scene"><option value="">All scenes</option></select>
+        <select id="f-result"><option value="">All results</option><option>success</option><option>skipped</option><option>aborted</option></select>
+        <label><input type="checkbox" id="f-help"> with help only</label>
+      </div>
+      <div id="stats" class="hint"></div>
+      <table id="episodes"><thead><tr><th>Started (UTC)</th><th>Scene</th><th>Target</th><th>Result</th><th>By</th><th>s</th></tr></thead><tbody></tbody></table>
+      <p id="empty" class="hint" hidden>No episodes yet. Start an autonomous run or a manual task in the operator view.</p>
+    </section>
+    <section class="detail" id="detail" hidden>
+      <div class="meta" id="meta"></div>
+      <div id="view3d" class="view3d"></div>
+      <div class="transport">
+        <button id="play">▶</button>
+        <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+        <input type="range" id="scrub" min="0" max="0" step="1" value="0">
+        <code id="clock">0.0 s</code>
+      </div>
+      <canvas id="timeline" height="38"></canvas>
+      <canvas id="chart" height="150"></canvas>
+      <div class="legend">
+        <span><i class="sw auto"></i>robot (auto)</span><span><i class="sw human"></i>operator</span><span><i class="sw none"></i>nobody: waiting / held</span>
+        <span><i class="sw line-dist"></i>gripper → target (cm)</span><span><i class="sw line-grip"></i>grip</span><span><i class="sw line-stick"></i>|stick|</span><span>▼ ticket · ┃ event</span>
+      </div>
+      <div class="cols">
+        <div><h3>At the cursor</h3><div class="kv" id="now"></div></div>
+        <div><h3>Tickets and events</h3><ol id="events" class="events"></ol></div>
+      </div>
+      <p class="hint"><a id="download" download>Download this episode (JSON)</a> · format <code>openarm-episode/v0</code>, described in <code>edge/episodes.py</code></p>
+    </section>
+  </main>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+  </script>
+  <script type="module" src="replay.js"></script>
+</body>
+</html>

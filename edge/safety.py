@@ -35,13 +35,13 @@ class SafetyGate:
         self.last_cmd_t = now
         return "clamped" if not np.array_equal(clamped, q) else "ok"
 
-    def activate(self, q_meas, now):
+    def activate(self, q_meas, now, reason="operator activated"):
         """Leave HOLD/ESTOP and resume from the current setpoint, so nothing jumps."""
         if self.target is None:
             self._freeze(q_meas)
         self.goal = self.target.copy()
         self.last_cmd_t = now
-        self._set(ACTIVE, "operator activated")
+        self._set(ACTIVE, reason)
 
     def hold(self, reason):
         """Stop at the current setpoint. Resyncing to the measured pose would let

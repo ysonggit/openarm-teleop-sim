@@ -20,7 +20,7 @@ def test_decimate_merges_close_vertices_and_drops_collapsed_faces():
 def test_scene_has_visual_meshes_berries_and_fits_in_a_few_mb():
     from edge.mujoco_adapter import MujocoAdapter
 
-    a = MujocoAdapter(MODEL, greenhouse_rows=True)
+    a = MujocoAdapter(MODEL, scene="strawberry")
     assert len(a.berry_ids) == 2  # a fixed robot only gets the berries it can reach
     meta, blob = export_scene(a.model)
     names = [g["name"] for g in meta["geoms"]]
