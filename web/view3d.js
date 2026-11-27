@@ -26,10 +26,15 @@ export async function createView3D(container, hello, sceneName) {
   const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(1, -1, 3);
   scene.add(sun);
-  const grid = new THREE.GridHelper(4, 40, 0x6b6a64, 0x9b978a); // 10 cm cells
-  grid.rotateX(Math.PI / 2);
-  grid.position.z = 0.001;
-  scene.add(grid);
+  const floor = meta.geoms.find((g) => g.type === "plane");
+  if (floor && meta.ground !== "soil") { // 10 cm cells over the floor; a soil scene shows the soil instead
+    const size = 2 * Math.max(floor.size[0], floor.size[1]);
+    const grid = new THREE.GridHelper(size, Math.round(size * 10), 0x6b6a64, 0x9b978a);
+    grid.rotateX(Math.PI / 2);
+    grid.position.set(floor.pos[0], floor.pos[1], 0.001);
+    scene.add(grid);
+  }
+  const soil = soilTexture();
 
   const bodies = Array.from({ length: meta.nbody }, () => new THREE.Group());
   scene.add(...bodies);
@@ -44,11 +49,13 @@ export async function createView3D(container, hello, sceneName) {
 
   const byId = new Map();
   for (const gm of meta.geoms) {
-    const geometry = makeGeometry(gm, meshGeom);
+    const isSoil = gm.name.startsWith("soil");
+    const geometry = isSoil ? withGroundUV(makeGeometry(gm, meshGeom).clone(), gm) : makeGeometry(gm, meshGeom);
     const [r, g, b, a] = gm.rgba;
     const material = new THREE.MeshStandardMaterial({
       color: new THREE.Color(r, g, b), opacity: a, transparent: a < 1,
-      roughness: 0.75, metalness: 0.1, side: THREE.DoubleSide,
+      roughness: isSoil ? 1 : 0.75, metalness: isSoil ? 0 : 0.1, side: THREE.DoubleSide,
+      ...(isSoil ? { map: soil, bumpMap: soil, bumpScale: 2 } : {}),
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.fromArray(gm.pos);
@@ -138,6 +145,42 @@ export async function createView3D(container, hello, sceneName) {
       return Math.atan2(d.y, d.x);
     },
   };
+}
+
+// Texture coordinates from world x, y (every 0.5 m), for the soil mesh, which has none.
+function withGroundUV(geometry, gm) {
+  const [qw, qx, qy, qz] = gm.quat;
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(...gm.pos), new THREE.Quaternion(qx, qy, qz, qw), new THREE.Vector3(1, 1, 1));
+  const p = geometry.attributes.position, v = new THREE.Vector3(), uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix4(m);
+    uv[2 * i] = v.x / 0.5; uv[2 * i + 1] = v.y / 0.5;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  return geometry;
+}
+
+// Procedural soil: brown base, dark and light crumbs, a few pebbles. Tiles seamlessly.
+function soilTexture() {
+  const N = 256, c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d");
+  g.fillStyle = "#5c4532";
+  g.fillRect(0, 0, N, N);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const dot = (x, y, r, color) => {
+    g.fillStyle = color;
+    for (const dx of [-N, 0, N]) for (const dy of [-N, 0, N]) { g.beginPath(); g.arc(x + dx, y + dy, r, 0, 2 * Math.PI); g.fill(); }
+  };
+  for (let i = 0; i < 900; i++) dot(rnd() * N, rnd() * N, 1 + rnd() * 5, `rgba(${rnd() < 0.5 ? "40,28,18" : "120,95,70"},${0.15 + rnd() * 0.35})`);
+  for (let i = 0; i < 2500; i++) dot(rnd() * N, rnd() * N, 0.6 + rnd(), `rgba(30,20,12,${0.2 + rnd() * 0.4})`);
+  for (let i = 0; i < 25; i++) dot(rnd() * N, rnd() * N, 1.5 + rnd() * 2, `rgba(150,140,125,${0.5 + rnd() * 0.4})`);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 function makeGeometry(gm, meshGeom) {

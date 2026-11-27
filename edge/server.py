@@ -99,6 +99,7 @@ class Edge:
         self._action = None  # command applied since the last recorded step
         self._cut = None  # target whose episode was cut for length; not reopened
         self.clock = time.monotonic  # tests swap in a simulated clock
+        self.record_rgbd = True  # head RGB-D frames go into the episodes too
 
     def add_world(self, adapter, gate, teleop, task, autopilot=None):
         self.worlds[adapter.scene] = dict(adapter=adapter, gate=gate, teleop=teleop, task=task, autopilot=autopilot)
@@ -183,7 +184,8 @@ class Edge:
         for i, side in a.detach_grasped():
             self.log.write("picked", berry=i, arm=side)
             self._event(now, "detached", target=i, arm=side)
-        result = self.task.tick(a.berry_positions(), a.berry_attached(), a.body_positions(TCP.values()), now)
+        result = self.task.tick(a.berry_positions(), a.berry_attached(), a.body_positions(TCP.values()), now,
+                                a.berry_placed())
         if result:
             await self._progress(result, now)
 
@@ -193,8 +195,14 @@ class Edge:
             await self._broadcast(json.dumps(self.state()))
         if tick % VIDEO_EVERY == 0 and self.watching and (self._frame is None or self._frame.done()):
             self._frame = asyncio.create_task(self._send_frame(a, a.data.qpos.copy()))
-        if tick % RGBD_EVERY == 0 and self.rgbd_clients and (self._rgbd is None or self._rgbd.done()):
-            self._rgbd = asyncio.create_task(self._send_rgbd(a, a.data.qpos.copy()))
+        rec = self.recorder
+        record = rec is not None and rec.wants_rgbd(now)
+        if (tick % RGBD_EVERY == 0 and (self.rgbd_clients or record)
+                and (self._rgbd is None or self._rgbd.done())):
+            ep_id = rec.ep["id"] if record else None
+            if record:
+                rec.mark_rgbd(now)
+            self._rgbd = asyncio.create_task(self._send_rgbd(a, a.data.qpos.copy(), now, ep_id))
 
         if self.controller is not None and self.clock() - self.last_input > IDLE_RELEASE_S:
             await self._release_idle()
@@ -285,8 +293,9 @@ class Edge:
             self._close_episode(now, "aborted", "target changed")
             name = a.model.geom(a.berry_ids[t.index]).name
             h = self.hello(None)
+            cam = {k: v for k, v in self.rgbd_hello().items() if k not in ("type", "fps_max")}
             rec.open(now, self.scene, TASKS.get(self.scene, "task"), t.index, name, t.starts[t.index], a.names,
-                     view={k: h[k] for k in ("camera", "base", "berries")})
+                     view={k: h[k] for k in ("camera", "base", "berries")}, rgbd=cam if self.record_rgbd else None)
         tcp = dict(zip(TCP, a.body_positions(TCP.values())))
         ok = rec.step(now, self.actor(), self.gate.mode, a.read()[0], self.gate.goal, a.base_pose(), tcp,
                       a.berry_positions()[t.index], a.berry_attached()[t.index], self._action,
@@ -321,10 +330,13 @@ class Edge:
         if adapter is self.adapter:  # not a frame of the scene we just switched away from
             await self._broadcast(jpeg, self.watching)
 
-    async def _send_rgbd(self, adapter, qpos):
-        """Color + depth for one snapshot, rendered and packed on the render thread."""
+    async def _send_rgbd(self, adapter, qpos, t=None, episode_id=None):
+        """Color + depth for one snapshot (taken at t), rendered and packed on the render
+        thread; sent to /rgbd viewers and stored in the episode it was taken for."""
         frame = await asyncio.get_running_loop().run_in_executor(
             self._renderer, lambda: rgbd.pack(*adapter.render_rgbd(qpos)))
+        if episode_id is not None:
+            self.recorder.add_rgbd(t, episode_id, frame)
         if adapter is self.adapter:
             await self._broadcast(frame, self.rgbd_clients)
 
@@ -534,6 +546,11 @@ async def scene_bin(request):
     return web.Response(body=e[1], content_type="application/octet-stream") if e else web.Response(status=404)
 
 
+async def episode_frame(request):
+    path = request.app["edge"].recorder.frame_path(request.match_info["id"], request.match_info["frame"])
+    return web.FileResponse(path) if path else web.Response(status=404)
+
+
 async def episode_file(request):
     path = request.app["edge"].recorder.path(request.match_info["id"])
     return web.FileResponse(path) if path else web.Response(status=404)
@@ -571,6 +588,7 @@ def main():
     print(f"session log: {edge.log.path}")
     for name, w in edge.worlds.items():
         meta, blob = edge.exports[name] = export_scene(w["adapter"].model)
+        meta["ground"] = getattr(SCENES[name], "GROUND", None)  # "soil": the 3D view draws soil, no floor grid
         print(f"3D scene {name}: {len(meta['geoms'])} geoms, {meta['nvert']} vertices, {len(blob) / 1e6:.1f} MB")
 
     middlewares = [no_stale_ui] if args.codes is None else [access.middleware(access.Codes(args.codes)), no_stale_ui]
@@ -584,6 +602,7 @@ def main():
     app.router.add_get("/scene.bin", scene_bin)
     app.router.add_get("/episodes", lambda r: web.json_response(edge.recorder.list()))
     app.router.add_get("/episodes/{id}", episode_file)
+    app.router.add_get("/episodes/{id}/rgbd/{frame}", episode_frame)
     app.router.add_get("/", lambda r: web.FileResponse(ROOT / "web/index.html"))
     app.router.add_static("/", ROOT / "web")
 

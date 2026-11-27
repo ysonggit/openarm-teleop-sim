@@ -5,7 +5,10 @@ An episode runs from the moment a target becomes the current one until it is don
 the robot on its own ("auto") or an operator ("human"), is recorded step by step in the
 same columns, so the hand-overs (help tickets, takeovers) are part of the data.
 
-File: episodes/<id>.json, plus one line per episode in episodes/index.jsonl (for listing).
+File: episodes/<id>.json, plus one line per episode in episodes/index.jsonl (for listing),
+and the head RGB-D frames in episodes/<id>/rgbd/00000.bin, 00001.bin, ... (one file per frame,
+the /rgbd wire format: uint32 LE n | n bytes JPEG color | zlib(uint16 LE depth in mm, row-major),
+depth 0 = no return; see edge/rgbd.py).
 
     {
       "format": "openarm-episode/v0",
@@ -31,7 +34,9 @@ File: episodes/<id>.json, plus one line per episode in episodes/index.jsonl (for
                     {"kind": "base", "v": [right, fwd, turn] -1..1, "yaw"} | {"kind": "home"}
       },
       "bodies_hz": 10, "bodies": [[x, y, z, qw, qx, qy, qz] * nbody per frame],  # 3D replay only
-      "view": {"camera", "base", "berries"}    # what the 3D view needs, as in the server's hello
+      "view": {"camera", "base", "berries"},   # what the 3D view needs, as in the server's hello
+      "rgbd": {"camera": {width, height, fx, fy, cx, cy, pitch, near, far, depth_unit},
+               "frames": [{"t", "file"}]}      # head camera, at up to RGBD_HZ (fewer if rendering is slow)
     }
 
 Velocities are stick deflections in the frame of the view the command was given in (yaw:
@@ -49,7 +54,9 @@ FORMAT = "openarm-episode/v0"
 RATE_HZ = 20
 BODY_EVERY = 2  # steps -> 10 Hz for the 3D replay
 MAX_S = 300  # an episode longer than this is cut (aborted); bounds memory
+RGBD_HZ = 5  # head RGB-D frames per second, at most; each ~0.1 MB
 ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
+FRAME_RE = re.compile(r"^\d{5}\.bin$")
 
 
 def _r(x, nd=4):
@@ -67,7 +74,7 @@ class Recorder:
     def index(self):
         return None if self.ep is None else self.ep["target"]["index"]
 
-    def open(self, now, scene, task, index, name, start, joint_names, view=None):
+    def open(self, now, scene, task, index, name, start, joint_names, view=None, rgbd=None):
         stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
         self._t0 = now
         self.ep = {
@@ -81,7 +88,29 @@ class Recorder:
             "steps": {k: [] for k in ("t", "actor", "mode", "q", "goal", "base", "tcp", "target", "attached", "action")},
             "bodies_hz": RATE_HZ // BODY_EVERY, "bodies": [],
             "view": view,  # 3D replay: robot camera, base body, target geoms and colors
+            "rgbd": None if rgbd is None else {"camera": rgbd, "frames": []},
         }
+        self._last_rgbd = None
+
+    def wants_rgbd(self, now):
+        """Is a head RGB-D frame due for the open episode?"""
+        return (self.ep is not None and self.ep["rgbd"] is not None
+                and (self._last_rgbd is None or now - self._last_rgbd >= 1 / RGBD_HZ))
+
+    def add_rgbd(self, now, episode_id, frame):
+        """Store one packed frame taken at `now` (it is rendered off the control loop, so it
+        may arrive after the episode moved on: then it is dropped)."""
+        if self.ep is None or self.ep["id"] != episode_id or self.ep["rgbd"] is None:
+            return
+        frames = self.ep["rgbd"]["frames"]
+        name = f"{len(frames):05d}.bin"
+        d = self.dir / episode_id / "rgbd"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / name).write_bytes(frame)
+        frames.append({"t": self.t(now), "file": name})
+
+    def mark_rgbd(self, now):
+        self._last_rgbd = now
 
     def t(self, now):
         return round(now - self._t0, 3)
@@ -136,6 +165,12 @@ class Recorder:
         lines = path.read_text().splitlines()[-limit:]
         return [json.loads(x) for x in reversed(lines) if x.strip()]
 
+    def frame_path(self, episode_id, name):
+        if not ID_RE.match(episode_id) or not FRAME_RE.match(name):
+            return None
+        p = self.dir / episode_id / "rgbd" / name
+        return p if p.exists() else None
+
     def path(self, episode_id):
         if not ID_RE.match(episode_id):
             return None
@@ -161,4 +196,5 @@ def summary(ep):
         "started_at": ep["started_at"], "duration_s": ep["duration_s"], "outcome": ep["outcome"],
         "actors": sorted({s["actor"] for s in ep["segments"]} - {"none"}),
         "tickets": [k["code"] for k in ep["tickets"]], "steps": len(ep["steps"]["t"]),
+        "rgbd_frames": 0 if ep.get("rgbd") is None else len(ep["rgbd"]["frames"]),
     }

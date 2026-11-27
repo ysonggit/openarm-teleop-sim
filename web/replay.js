@@ -6,6 +6,10 @@ const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const SCENE_NAMES = { strawberry: "Strawberries", weeding: "Weeding" };
 const DIST_MAX = 0.5; // m, top of the distance chart
+const DEPTH_MIN = 0.2, DEPTH_MAX = 2.0; // m, depth color scale (display only)
+const LUT = turboLut();
+const frames = new Map(); // "<episode>/<file>" -> Promise<{url, depth ImageData}>
+let shownFrame = null;
 
 let all = [], ep = null, d = null, i = 0, playing = false, lastFrame = 0;
 const views = new Map(); // scene -> {el, view}
@@ -37,6 +41,7 @@ function renderList() {
 
 async function open(id) {
   ep = await fetch(`episodes/${encodeURIComponent(id)}`).then((r) => r.json());
+  shownFrame = null;
   d = derive(ep);
   history.replaceState(null, "", `#${id}`);
   renderList();
@@ -116,6 +121,56 @@ function seek(k) {
   drawTimeline();
   drawChart();
   showNow();
+  showRgbd();
+}
+
+// Head RGB-D frame at the cursor: the last one taken at or before this step.
+function showRgbd() {
+  const r = ep.rgbd, list = r?.frames ?? [];
+  $("rgbd").hidden = !r;
+  if (!r) return;
+  let k = -1;
+  for (let j = 0; j < list.length && list[j].t <= d.t[i] + 1e-6; j++) k = j;
+  if (k < 0) k = list.length ? 0 : -1;
+  $("r-range").textContent = `${DEPTH_MIN}–${DEPTH_MAX} m`;
+  if (k < 0) { $("r-info").textContent = "No frames in this episode."; return; }
+  const f = list[k], key = `${ep.id}/${f.file}`;
+  $("r-info").textContent = `Frame ${k + 1} / ${list.length}, taken at ${f.t.toFixed(2)} s · ${r.camera.width}×${r.camera.height}, `
+    + `${(list.length / Math.max(ep.duration_s, 0.1)).toFixed(1)} fps recorded`;
+  if (shownFrame === key) return;
+  shownFrame = key;
+  if (!frames.has(key)) frames.set(key, loadFrame(ep.id, f.file, r.camera));
+  frames.get(key).then((fr) => {
+    if (shownFrame !== key) return; // the cursor moved on
+    $("r-color").src = fr.url;
+    $("r-depth").getContext("2d").putImageData(fr.depth, 0, 0);
+  }).catch(() => { $("r-info").textContent = `Frame ${f.file} could not be loaded.`; });
+}
+
+// Frame file = the /rgbd wire format: uint32 LE n | n bytes JPEG | zlib(uint16 LE depth, mm).
+async function loadFrame(id, file, cam) {
+  const buf = await fetch(`episodes/${encodeURIComponent(id)}/rgbd/${file}`).then((r) => {
+    if (!r.ok) throw new Error(r.status);
+    return r.arrayBuffer();
+  });
+  const n = new DataView(buf).getUint32(0, true);
+  const url = URL.createObjectURL(new Blob([buf.slice(4, 4 + n)], { type: "image/jpeg" }));
+  const raw = await new Response(new Blob([buf.slice(4 + n)]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer();
+  const mm = new Uint16Array(raw), img = new ImageData(cam.width, cam.height);
+  for (let p = 0; p < mm.length; p++) {
+    const z = mm[p] / 1000;
+    const c = mm[p] ? LUT[Math.round(255 * Math.min(1, Math.max(0, (z - DEPTH_MIN) / (DEPTH_MAX - DEPTH_MIN))))] : [0, 0, 0];
+    img.data.set([c[0], c[1], c[2], 255], p * 4);
+  }
+  return { url, depth: img };
+}
+
+function turboLut() { // Google's Turbo colormap, polynomial fit
+  const poly = (t, k) => k.reduceRight((acc, c) => acc * t + c, 0);
+  const R = [0.13572138, 4.6153926, -42.66032258, 132.13108234, -152.94239396, 59.28637943];
+  const G = [0.09140261, 2.19418839, 4.84296658, -14.18503333, 4.27729857, 2.82956604];
+  const B = [0.1066733, 12.64194608, -60.58204836, 110.36276771, -89.90310912, 27.34824973];
+  return Array.from({ length: 256 }, (_, j) => [R, G, B].map((k) => Math.round(255 * Math.min(1, Math.max(0, poly(j / 255, k))))));
 }
 
 function showNow() {

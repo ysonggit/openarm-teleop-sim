@@ -28,11 +28,11 @@ def teleop(adapter):
 
 
 def test_arms_stand_on_the_base(adapter):
-    from edge.mujoco_adapter import BASE_FENCE, BASE_JOINTS, BASE_VMAX, MOUNT_Z
+    from edge.mujoco_adapter import BASE_FENCE_X, BASE_FENCE_Y, BASE_JOINTS, BASE_VMAX, MOUNT_Z
 
     assert adapter.names[:3] == list(BASE_JOINTS) and len(adapter.names) == 19
     np.testing.assert_allclose(adapter.vmax[:3], BASE_VMAX)
-    np.testing.assert_allclose(adapter.upper[:2], BASE_FENCE)
+    np.testing.assert_allclose(adapter.upper[:2], [BASE_FENCE_X[1], BASE_FENCE_Y])
     assert np.isinf(adapter.upper[2])  # yaw may turn freely
     import mujoco
 
@@ -113,7 +113,7 @@ def test_berry_hangs_until_squeezed_then_comes_off_and_counts(world):
     task.index = 1  # the right-row berry
     p = world.berry_start[1]
     goal = pick(world, t, goal, p)
-    assert world.berry_attached() == [True, False, True, True, True, True]
+    assert world.berry_attached() == [True, False] + [True] * 6
     args = world.berry_positions(), world.berry_attached(), world.body_positions(TCP.values())
     assert task.tick(*args, now=10.0) is None
     assert task.status == "in the gripper"
@@ -149,7 +149,7 @@ def test_off_center_grasps_hold_and_shallow_ones_leave_the_berry_on(world, offse
 def test_a_berry_down_the_aisle_can_be_picked_after_driving(world):
     world.reset_berries()
     t, goal = make_teleop(world), world.home.copy()
-    p = world.berry_start[4]  # left row, 1.6 m down the aisle
+    p = world.berry_start[4]  # left row, 4.1 m down the aisle
     for x in np.linspace(0, p[0] - 0.40, 50):
         goal[0] = x
         world.write(goal)
@@ -170,7 +170,7 @@ def test_driving_down_the_aisle_touches_nothing(world):
     world.reset_berries()
     robot = {b for b in range(1, m.nbody) if not m.body(b).name.startswith("berry")}
     goal = world.home.copy()
-    for x in list(np.linspace(0, 1.5, 60)) + list(np.linspace(1.5, -1.0, 100)):
+    for x in list(np.linspace(0, 9.5, 380)) + list(np.linspace(9.5, -1.0, 420)):
         goal[0] = x
         world.write(goal)
         world.step(0.05)
@@ -221,15 +221,15 @@ def test_home_leaves_the_base_where_it_is(teleop, adapter):
 
 
 def test_gate_keeps_the_base_inside_the_fence(adapter):
-    from edge.mujoco_adapter import BASE_FENCE
+    from edge.mujoco_adapter import BASE_FENCE_X
     from edge.safety import SafetyGate
 
     gate = SafetyGate(adapter.lower, adapter.upper, adapter.vmax)
     gate.activate(adapter.home, now=0.0)
     goal = adapter.home.copy()
-    goal[0] = 5.0
+    goal[0] = 50.0
     assert gate.command(goal, now=0.0) == "clamped"
-    assert gate.goal[0] == BASE_FENCE
+    assert gate.goal[0] == BASE_FENCE_X[1]
 
 
 def test_driving_moves_the_grippers_in_the_world(adapter):

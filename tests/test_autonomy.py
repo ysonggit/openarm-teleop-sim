@@ -42,11 +42,14 @@ def make_edge(tmp_path, scene):
                 HarvestTask(a.berry_start), autopilot=Autopilot(PLANS[scene]), recorder=Recorder(tmp_path / "ep"))
     clock = {"t": 0.0}
     edge.clock = lambda: clock["t"]
+    # A fake head camera: real rendering is slow and needs a GL context; the frame format is the same.
+    a.render_rgbd = lambda qpos: (np.full((240, 320, 3), 90, np.uint8), np.full((240, 320), 0.8))
 
     async def run(ticks, until=lambda: False, each=None):
         for _ in range(ticks):
             clock["t"] += LOOP_DT
             await edge.tick(round(clock["t"] / LOOP_DT))
+            await asyncio.sleep(0)  # let finished renders land
             if each is not None and round(clock["t"] / LOOP_DT) % 5 == 0:
                 await each()
             if until():
@@ -71,7 +74,8 @@ def test_weeding_scene_has_weeds_held_in_the_soil():
 def test_robot_asks_for_help_an_operator_solves_or_skips_and_every_attempt_is_recorded(tmp_path):
     """Strawberries: berries 2 and 4 are marked hard, so the robot raises tickets there.
     An operator solves the first (driven here by a second autopilot through the operator
-    message path) and gives up on the second; the robot does the rest."""
+    message path) and gives up on the second; the robot does the rest. Every picked berry
+    ends up in the basket on the base and stays there while the base drives on."""
     from edge.autopilot import PLANS, Autopilot, Plan
 
     edge, run = make_edge(tmp_path, "strawberry")
@@ -88,7 +92,7 @@ def test_robot_asks_for_help_an_operator_solves_or_skips_and_every_attempt_is_re
         await edge.handle(human, {"type": "accept"})
         assert edge.controller is human and edge.state()["actor"] == "human"
         p = PLANS["strawberry"]
-        driver = Autopilot(Plan(p.base_dx, p.pre, p.grasp, p.pull))
+        driver = Autopilot(Plan(p.base_dx, p.pre, p.grasp, p.pull, place=p.place))
         driver.start(edge.clock())
 
         async def drive():  # the "operator": same messages as the browser
@@ -106,12 +110,15 @@ def test_robot_asks_for_help_an_operator_solves_or_skips_and_every_attempt_is_re
         await edge.handle(human, {"type": "skip"})
         assert human.json[-1]["reason"] == "skipped" and edge.task.index == 5
 
-        assert await run(4000, until=lambda: not ap.running)
+        assert await run(8000, until=lambda: not ap.running)
 
     asyncio.run(scenario())
     eps = list(reversed(edge.recorder.list()))
-    assert [e["outcome"]["result"] for e in eps] == ["success"] * 4 + ["skipped", "success"]
-    assert [e["outcome"]["by"] for e in eps] == ["auto", "auto", "human", "auto", "human", "auto"]
+    assert [e["outcome"]["result"] for e in eps] == ["success"] * 4 + ["skipped"] + ["success"] * 3
+    assert [e["outcome"]["by"] for e in eps] == ["auto", "auto", "human", "auto", "human", "auto", "auto", "auto"]
+    placed = edge.adapter.berry_placed()
+    assert all(placed[i] for i in (0, 1, 2, 3, 5, 6, 7)) and not placed[4]
+    assert all(e["rgbd_frames"] > 0 for e in eps if e["outcome"]["result"] == "success")
     assert eps[2]["tickets"] == ["occluded"] and eps[2]["actors"] == ["auto", "human"]
 
     ep = json.loads(edge.recorder.path(eps[2]["id"]).read_text())
@@ -127,6 +134,13 @@ def test_robot_asks_for_help_an_operator_solves_or_skips_and_every_attempt_is_re
     assert human_actions and {x["kind"] for x in human_actions} <= {"ee", "base", "home"}
     assert steps["attached"][0] and not steps["attached"][-1]
     assert len(ep["bodies"]) == (n + 1) // 2
+    frames = ep["rgbd"]["frames"]
+    assert ep["rgbd"]["camera"]["width"] == 320 and len(frames) == eps[2]["rgbd_frames"]
+    assert all(b["t"] - a["t"] >= 0.2 - 1e-9 for a, b in zip(frames, frames[1:]))  # at most 5 Hz
+    from edge import rgbd
+    jpeg, depth = rgbd.unpack(edge.recorder.frame_path(ep["id"], frames[0]["file"]).read_bytes())
+    assert jpeg[:2] == b"\xff\xd8" and depth.shape == (240, 320) and np.allclose(depth, 0.8)
+    assert edge.recorder.frame_path(ep["id"], "../index.jsonl") is None
 
 
 def test_weeding_run_needs_help_twice(tmp_path):
@@ -149,6 +163,19 @@ def test_weeding_run_needs_help_twice(tmp_path):
     asyncio.run(scenario())
     results = [e["outcome"]["result"] for e in reversed(edge.recorder.list())]
     assert results == ["success", "skipped", "success", "success", "aborted"]
+
+
+def test_weeding_beds_are_raised_trapezoids_of_rough_soil():
+    from edge import tunnel
+
+    v, f = tunnel.terrain()
+    top = np.abs(v[:, 1] - 0.55) < 0.1  # middle of a bed
+    assert abs(np.median(v[top & (np.abs(v[:, 0] - 3) < 2), 2]) - tunnel.BED_TOP) < 0.01
+    aisle = (np.abs(v[:, 1]) < 0.2) & (np.abs(v[:, 0] - 3) < 2)
+    assert np.median(v[aisle, 2]) < 0.02 and np.std(v[aisle, 2]) > 0.002  # low and not flat
+    # sloped sides: half height halfway between foot and top edge
+    assert abs(tunnel.bed_height(3.0, (tunnel.BED_IN[0] + tunnel.BED_IN[1]) / 2) - tunnel.BED_TOP / 2) < 1e-6
+    assert f.max() < len(v)
 
 
 def test_scene_switch_only_when_nobody_drives(tmp_path):

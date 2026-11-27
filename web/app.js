@@ -97,7 +97,7 @@ function setView(v) {
 }
 
 const HINTS = {
-  strawberry: "Pick the amber strawberry: come in from behind with the fingers either side, close the gripper, then pull it away. Left row: left arm, right row: right arm.",
+  strawberry: "Pick the amber strawberry: come in from behind with the fingers either side, close the gripper, pull it off, then carry it over the basket on the base and let go. It counts once it rests in the basket. Left row: left arm, right row: right arm.",
   weeding: "Pull the amber weed: come down over it from above, close the gripper around the stem, then lift it out. Left bed: left arm, right bed: right arm.",
 };
 const SCENE_NAMES = { strawberry: "Tabletop strawberries", weeding: "Soil-bed tunnel: weeding" };

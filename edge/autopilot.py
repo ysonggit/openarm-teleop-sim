@@ -19,7 +19,9 @@ TOL = 0.008  # m: an arm waypoint counts as reached
 BASE_TOL = 0.02  # m
 HOME_S = 2.0  # time for the arms to get home (the gate limits joint speed)
 CLOSE_S = 1.0  # time to close the gripper
-TIME_LIMIT = {"drive": 15.0, "pre": 8.0, "reach": 6.0, "pull": 6.0}  # s
+RELEASE_S = 3.0  # time for a dropped berry to settle in the basket
+TIME_LIMIT = {"drive": 30.0, "pre": 8.0, "reach": 6.0, "pull": 6.0, "carry": 8.0, "release": RELEASE_S}  # s
+HELD = 0.05  # m; further than this from the gripper while carrying = dropped
 
 
 @dataclass
@@ -31,6 +33,7 @@ class Plan:
     grasp: tuple  # where the gripper closes
     pull: tuple  # where to take the target after closing; the task counts it on the way
     hard: dict = field(default_factory=dict)  # target index -> (code, text): raise a ticket instead
+    place: tuple = None  # base frame (x, y, z), y times side: carry it here and let go; None: just pull
 
 
 def _at(target, offset, side):
@@ -99,7 +102,9 @@ class Autopilot:
             self._go("drive", now)
 
         if elapsed > TIME_LIMIT.get(self.phase, np.inf):
-            if self.phase == "pull":
+            if self.phase == "release":
+                code, text = "missed_basket", "let go, but the berry did not land in the basket"
+            elif self.phase == "pull":
                 code, text = ("not_detached", "grasp failed: still attached") if obs["attached"] else \
                              ("dropped", "lost it while pulling")
             else:
@@ -126,7 +131,22 @@ class Autopilot:
                 self._go("pull", now)
             return _ee(arm, _vel(_at(obs["target"], p.grasp, side) - tcp), 1.0), None
         if self.phase == "pull":
-            return _ee(arm, _vel(_at(obs["target"], p.pull, side) - tcp), 1.0), None
+            goal = _at(obs["target"], p.pull, side)
+            if p.place is not None and np.linalg.norm(goal - tcp) < TOL:
+                if obs["attached"]:
+                    return None, self._raise(i, "not_detached", "grasp failed: still attached", now)
+                self._go("carry", now)
+            return _ee(arm, _vel(goal - tcp), 1.0), None
+        if self.phase == "carry":
+            if np.linalg.norm(np.asarray(obs["target_pos"]) - tcp) > HELD:
+                return None, self._raise(i, "dropped", "dropped it on the way to the basket", now)
+            bx, by, yaw = obs["base_goal"]
+            c, s = np.cos(yaw), np.sin(yaw)
+            px, py, pz = p.place
+            goal = np.array([bx + c * px - s * side * py, by + s * px + c * side * py, pz])
+            return self._move(arm, tcp, goal, 1.0, "release", now)
+        if self.phase == "release":  # open and wait: the task counts the berry once it rests in the basket
+            return _ee(arm, np.zeros(3), 0.0), None
         return None, None
 
     def _move(self, arm, tcp, goal, grip, next_phase, now):
@@ -164,7 +184,8 @@ def _base(err):
 # what a real robot would be unsure about. Every other ticket comes from a real failure.
 PLANS = {
     # Come in from the aisle side, close, pull back toward the aisle and down off the stem.
-    "strawberry": Plan(base_dx=-0.40, pre=(0, -0.10, 0), grasp=(0, 0, 0), pull=(0, -0.12, -0.04),
+    # Then carry it over the basket on the base and let go.
+    "strawberry": Plan(base_dx=-0.40, pre=(0, -0.10, 0), grasp=(0, 0, 0), pull=(0, -0.12, -0.04), place=(0.16, 0.03, 0.50),
                        hard={2: ("occluded", "leaves hide part of the berry: where to grip?"),
                              4: ("ripeness", "is this berry ripe enough to pick?")}),
     # Come down from above, close around the stem, pull straight up.

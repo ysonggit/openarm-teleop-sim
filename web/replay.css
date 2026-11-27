@@ -37,3 +37,10 @@ canvas { width: 100%; display: block; }
 .events li.ticket { color: var(--stop); }
 .events li:hover { text-decoration: underline; }
 .detail .view3d { aspect-ratio: 16 / 9; }
+.rgbd { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.rgbd figure { margin: 0; min-width: 0; }
+.rgbd img, .rgbd canvas { width: 100%; aspect-ratio: 4 / 3; display: block; background: #000; border-radius: 6px; }
+.rgbd figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.rgbd p { grid-column: 1 / -1; margin: 0; }
+.ramp { display: inline-block; width: 60px; height: 8px; vertical-align: 0; border-radius: 2px;
+  background: linear-gradient(90deg, #30123b, #4686fb, #1ae4b6, #a2fc3c, #fab93a, #e4460a, #7a0403); }

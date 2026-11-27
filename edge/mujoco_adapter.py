@@ -23,7 +23,8 @@ GRASP_DEPTH = 0.012  # m; a berry comes off its stem only if no further than thi
 # Stanford TidyBot base (MuJoCo Menagerie): planar x, y, yaw joints, no wheel physics.
 BASE_JOINTS = ("joint_x", "joint_y", "joint_th")
 BASE_VMAX = (0.5, 0.5, 1.0)  # m/s, m/s, rad/s
-BASE_FENCE = 1.5  # m; the base may not leave this square around the start (floor is 2 m)
+BASE_FENCE_X = (-1.5, 10.0)  # m; along the aisle (the rows are 10 m long)
+BASE_FENCE_Y = 1.5  # m; across it
 BASE_TOP = 0.335  # m; top of the TidyBot arm plate
 BASE_HALF_WIDTH = 0.241  # m; the TidyBot bumper is a 0.48 m square
 COLUMN_SINK = 0.18  # m; the OpenArm column's foot sits inside the base, so the shoulders end up ~0.85 m high.
@@ -41,10 +42,12 @@ class MujocoAdapter:
         self.mount_z = 0.0
         if base_path:
             spec = self._mount_on_base(spec, base_path)
-        spec.worldbody.add_geom(
-            type=mujoco.mjtGeom.mjGEOM_PLANE, size=[2, 2, 0.05], rgba=[0.55, 0.5, 0.42, 1]
-        )
+        x0, x1 = BASE_FENCE_X[0] - 0.5, BASE_FENCE_X[1] + 1.0  # floor under the whole drivable aisle
+        spec.worldbody.add_geom(name="floor", type=mujoco.mjtGeom.mjGEOM_PLANE, size=[(x1 - x0) / 2, 2, 0.05],
+                                pos=[(x0 + x1) / 2, 0, 0], rgba=[0.55, 0.5, 0.42, 1])
         spec.worldbody.add_light(pos=[0, 0, 2], dir=[0, 0, -1])
+        for x in np.arange(3.0, x1, 3.0):  # more lights down the aisle, without shadows (cheap to render)
+            spec.worldbody.add_light(pos=[x, 0, 2.5], dir=[0, 0, -1], castshadow=False)
         spec.visual.headlight.ambient = [0.35] * 3  # greenhouse daylight for the rendered cameras
         spec.visual.headlight.diffuse = [0.55] * 3
         self.scene = scene
@@ -98,7 +101,8 @@ class MujocoAdapter:
         base.option.timestep = arm.option.timestep
         for name in BASE_JOINTS[:2]:
             act = base.actuator(name)
-            act.ctrllimited, act.ctrlrange = True, [-BASE_FENCE, BASE_FENCE]
+            act.ctrllimited = True
+            act.ctrlrange = BASE_FENCE_X if name == "joint_x" else [-BASE_FENCE_Y, BASE_FENCE_Y]
         mount = base.body("base_link").add_frame(pos=[0, 0, MOUNT_Z])
         base.attach(arm, frame=mount, prefix="")
         self.mount_z = MOUNT_Z
@@ -154,6 +158,16 @@ class MujocoAdapter:
 
     def berry_positions(self):
         return [self.data.xpos[self.model.geom_bodyid[g]].copy() for g in self.berry_ids]
+
+    def berry_placed(self):
+        """Per target: resting where it should go (the basket on the base), or None if the
+        scene has no such place (pulling it out is enough)."""
+        if not hasattr(SCENES.get(self.scene), "in_basket") or self.base_qadr is None:
+            return None
+        x, y, th = self.base_pose()
+        c, s = np.cos(th), np.sin(th)
+        to_base = np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+        return [SCENES[self.scene].in_basket(to_base @ (p - [x, y, 0])) for p in self.berry_positions()]
 
     def berry_attached(self):
         return [bool(self.data.eq_active[e]) for e in self.stem_ids]

@@ -1,5 +1,8 @@
 """Harvest task: pick each highlighted strawberry in order with either gripper.
 
+With a basket on the base, a berry counts once it rests in the basket for DWELL
+seconds (pick, carry, drop). Without one (fixed column, or weeds) it counts as below.
+
 A berry comes off its stem when both fingers of one gripper squeeze it. It
 counts once it is off the stem, still in a gripper (within HOLD of a TCP) and
 at least PULL away from where it hung, for DWELL seconds. Each trial's
@@ -29,8 +32,9 @@ class HarvestTask:
         self.trial_start, self.inside_since = now, None
         self.dist = self.status = None
 
-    def tick(self, berries, attached, tcps, now):
-        """berries: positions; attached: still on the stem; tcps: gripper centers.
+    def tick(self, berries, attached, tcps, now, placed=None):
+        """berries: positions; attached: still on the stem; tcps: gripper centers;
+        placed: resting in the basket (None: the scene has no basket, pulling off is enough).
         Returns 'hit' or 'done' on progress, else None."""
         if not self.active:
             return None
@@ -38,8 +42,11 @@ class HarvestTask:
         p = berries[i]
         self.dist = float(min(np.linalg.norm(t - p) for t in tcps))
         held = not attached[i] and self.dist < HOLD
-        self.status = "on the stem" if attached[i] else "in the gripper" if held else "dropped"
-        if not held or np.linalg.norm(p - self.starts[i]) < PULL:
+        in_place = placed is not None and not attached[i] and placed[i]
+        self.status = ("on the stem" if attached[i] else "in the basket" if in_place
+                       else "in the gripper" if held else "dropped")
+        done = in_place if placed is not None else held and np.linalg.norm(p - self.starts[i]) >= PULL
+        if not done:
             self.inside_since = None
             return None
         if self.inside_since is None:

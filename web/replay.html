@@ -28,6 +28,11 @@
     <section class="detail" id="detail" hidden>
       <div class="meta" id="meta"></div>
       <div id="view3d" class="view3d"></div>
+      <div class="rgbd" id="rgbd">
+        <figure><img id="r-color" alt="head camera color at the cursor"><figcaption>Head camera, color</figcaption></figure>
+        <figure><canvas id="r-depth" width="320" height="240"></canvas><figcaption>Depth <span class="ramp"></span> <span id="r-range"></span></figcaption></figure>
+        <p class="hint" id="r-info"></p>
+      </div>
       <div class="transport">
         <button id="play">▶</button>
         <select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
